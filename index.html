@@ -40,7 +40,7 @@
           <button class="btn-logout" onclick="App.doLogout()">خروج</button>
         </div>
         <div class="sidebar-logo">
-          <img src="img/logo.webp" alt="گیمنت اینفینیتی" style="height:28px;">
+          <img src="img/logo.webp" alt="گیمنت اینفینیتی" style="height:28px;">opencode
           <span>گیمنت اینفینیتی</span>
         </div>
       </div>
@@ -66,6 +66,12 @@
       <div id="tab-tournaments" class="tab-content"></div>
     </div>
   </div>
+
+  <div id="modalOverlay" class="modal-overlay" onclick="App.closeModal(event)">
+    <div id="modalContent" class="modal"></div>
+  </div>
+
+  <div id="toast" class="toast"></div>
 
   <script src="lib/xlsx.full.min.js"></script>
   <script src="js/jalali.js"></script>
