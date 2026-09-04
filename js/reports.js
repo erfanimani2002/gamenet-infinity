@@ -189,13 +189,18 @@ const Reports = (function () {
     let totalTournamentIncome = dailyTournaments.reduce((s, t) => s + (t.entryFee || 0) * (t.participants || []).length, 0);
     let totalDeviceCost = activeMatches.reduce((s, m) => s + (m.deviceCost || 0), 0);
 
+    let walletCharges = await DB.getAll("walletCharges");
+    let dailyCharges = walletCharges.filter((c) => Utils.isInRange(c.date, range.start, range.end));
+    let chargeCash = 0, chargeCard = 0;
+    dailyCharges.forEach((c) => { if (c.paymentType === "cash") chargeCash += c.amount; else chargeCard += c.amount; });
+
     let allTransactions = [
       ...sessions.filter((s) => s.status === "settled" && s.settledAt && Utils.isInRange(s.settledAt, range.start, range.end)).map((s) => ({ payType: s.settlePayType, amount: s.settleAmount || 0 })),
       ...cafeOrders.filter((o) => Utils.isInRange(o.createdAt, range.start, range.end)).map((o) => ({ payType: o.payType, amount: o.total })),
       ...debtPayments.filter((p) => Utils.isInRange(p.date, range.start, range.end)).map((d) => ({ payType: d.paymentType, amount: d.amount })),
     ];
 
-    let totalCash = 0, totalCard = 0;
+    let totalCash = chargeCash + totalTournamentIncome, totalCard = 0;
     allTransactions.forEach((t) => { if (t.payType === "cash") totalCash += t.amount; else if (t.payType === "card") totalCard += t.amount; });
 
     el.innerHTML = `
@@ -496,5 +501,5 @@ const Reports = (function () {
     App.toast("اکسل دانلود شد");
   }
 
-  return { renderDaily, renderInstant, renderMonthly, loadMonthlyReport, showFullTransactions, exportDailyExcel, exportMonthlyExcel, closeDay, editTransaction, saveEditTransaction, deleteTransaction };
+  return { renderDaily, renderInstant, renderMonthly, loadMonthlyReport, showFullTransactions, exportDailyExcel, exportMonthlyExcel, closeDay, editTransaction, saveEditTransaction, deleteTransaction, reversePayment };
 })();

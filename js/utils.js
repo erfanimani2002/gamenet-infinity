@@ -6,6 +6,10 @@ const Utils = (function () {
     yesterday.setHours(23, 35, 0, 0);
     let today = new Date(d);
     today.setHours(23, 35, 0, 0);
+    if (d >= today) {
+      yesterday = new Date(today);
+      today.setDate(today.getDate() + 1);
+    }
     return { start: yesterday, end: today };
   }
 

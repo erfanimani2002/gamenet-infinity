@@ -251,6 +251,13 @@ const PCs = (function () {
       }
     }
 
+    // Reverse payments from settled time blocks
+    for (let b of (session.timeBlocks || [])) {
+      if (b.settled && b.settlePayType && session.ids && session.ids[0]) {
+        await Reports.reversePayment(session.ids[0], b.price || 0, b.settlePayType);
+      }
+    }
+
     await DB.remove("sessions", session.id);
     await DB.put("devices", { ...await DB.get("devices", deviceId), status: "free" });
     await DB.logActivity("لغو سشن پی‌سی", "سشن #" + session.id + " حذف شد");
