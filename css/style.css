@@ -335,7 +335,6 @@ body {
    SIDEBAR — GLASS
    ===================================================== */
 #appScreen {
-  display: flex;
   min-height: 100vh;
 }
 
