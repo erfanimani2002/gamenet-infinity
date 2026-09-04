@@ -1,6 +1,6 @@
 const DB = (function () {
   const DB_NAME = "GameNetInfinity";
-  const DB_VERSION = 3;
+  const DB_VERSION = 4;
   let db = null;
 
   const STORES = {
@@ -23,6 +23,7 @@ const DB = (function () {
     tournaments: { keyPath: "id", autoIncrement: true },
     matches: { keyPath: "id", autoIncrement: true },
     tournamentParticipants: { keyPath: "id", autoIncrement: true },
+    blockPayments: { keyPath: "id", autoIncrement: true },
   };
 
   const INDEXES = {
@@ -39,6 +40,7 @@ const DB = (function () {
     purchases: [{ name: "by_date", keyPath: "date" }],
     matches: [{ name: "by_tournament", keyPath: "tournamentId" }],
     tournamentParticipants: [{ name: "by_tournament", keyPath: "tournamentId" }],
+    blockPayments: [{ name: "by_session", keyPath: "sessionId" }],
   };
 
   function open() {

@@ -224,6 +224,12 @@ const Billiard = (function () {
     block.settlerName = settlerName;
     block.settledAt = new Date().toISOString();
     await DB.put("sessions", session);
+    await DB.add("blockPayments", {
+      customerId: payerId, sessionId: session.id, deviceId,
+      deviceType: session.deviceType, blockIndex,
+      amount: block.price, payType, settlerName,
+      date: new Date().toISOString()
+    });
     await DB.logActivity("تسویه بلوک بیلیارد", "سشن #" + session.id + " | بلوک " + (blockIndex + 1) + " | " + Utils.formatCurrency(block.price) + " | " + payType + " | " + settlerName);
     App.toast("بلوک تسویه شد");
     settleBlock(deviceId);
@@ -402,6 +408,11 @@ const Billiard = (function () {
       if (b.settled && b.settlePayType && session.ids && session.ids[0]) {
         await Reports.reversePayment(session.ids[0], b.price || 0, b.settlePayType);
       }
+    }
+    // Remove block payment records
+    let allBp = await DB.getAll("blockPayments");
+    for (let bp of allBp.filter((bp) => bp.sessionId === session.id)) {
+      await DB.remove("blockPayments", bp.id);
     }
 
     App.stopTimer("timer-billiard-" + deviceId);

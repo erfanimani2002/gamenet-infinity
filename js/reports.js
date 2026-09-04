@@ -6,6 +6,7 @@ const Reports = (function () {
     let debtPayments = await DB.getAll("debtPayments");
     let walletCharges = await DB.getAll("walletCharges");
     let purchases = await DB.getAll("purchases");
+    let blockPayments = await DB.getAll("blockPayments");
 
     let settledSessions = sessions.filter((s) => s.status === "settled" && s.settledAt && Utils.isInRange(s.settledAt, range.start, range.end));
     let dailyOrders = cafeOrders.filter((o) => Utils.isInRange(o.createdAt, range.start, range.end));
@@ -27,6 +28,15 @@ const Reports = (function () {
     let billiardCalc = calcSection(settledSessions.filter((s) => s.deviceType === "billiard"));
     let pcCalc = calcSection(settledSessions.filter((s) => s.deviceType === "pc"));
 
+    let consoleBlock = { cash: 0, card: 0 };
+    let billiardBlock = { cash: 0, card: 0 };
+    blockPayments.filter((bp) => Utils.isInRange(bp.date, range.start, range.end)).forEach((bp) => {
+      let amt = bp.amount || 0;
+      let target = bp.deviceType === "console" ? consoleBlock : billiardBlock;
+      if (bp.payType === "cash") target.cash += amt;
+      else if (bp.payType === "card") target.card += amt;
+    });
+
     let cafeCash = 0, cafeCard = 0;
     dailyOrders.forEach((o) => { if (o.payType === "cash") cafeCash += o.total; else if (o.payType === "card") cafeCard += o.total; });
 
@@ -40,17 +50,31 @@ const Reports = (function () {
     dailyPurchases.forEach((p) => {
       if (p.paymentType === "cash") purchaseCash += p.amount;
       else if (p.paymentType === "pasargad") purchaseCard += p.amount;
+      else if (p.paymentType !== "other") purchaseOther += p.amount;
+    });
+    purchases.filter((p) => p.paymentType === "other" && p.settled && p.settledWith && Utils.isInRange(p.settledAt, range.start, range.end)).forEach((p) => {
+      let eff = p.settledWith;
+      if (eff === "cash") purchaseCash += p.amount;
+      else if (eff === "pasargad") purchaseCard += p.amount;
       else purchaseOther += p.amount;
     });
 
     let tournaments = await DB.getAll("tournaments");
     let matchData = await DB.getAll("matches");
-    let dailyTournaments = tournaments.filter((t) => Utils.isInRange(t.createdAt, range.start, range.end));
     let activeMatches = matchData.filter((m) => m.status === "completed" && m.timerEnd && Utils.isInRange(m.timerEnd, range.start, range.end));
-    let totalTournamentIncome = dailyTournaments.reduce((s, t) => s + (t.entryFee || 0) * (t.participants || []).length, 0);
+    let tournamentCash = 0, tournamentCard = 0;
+    tournaments.forEach((t) => {
+      if (!t.entryFeeStatus) return;
+      Object.values(t.entryFeeStatus).forEach((efs) => {
+        if (efs.collected && efs.settledAt && Utils.isInRange(efs.settledAt, range.start, range.end)) {
+          if (efs.payType === "cash") tournamentCash += t.entryFee || 0;
+          else if (efs.payType === "card") tournamentCard += t.entryFee || 0;
+        }
+      });
+    });
 
-    let totalCashIn = consoleCalc.cash + billiardCalc.cash + pcCalc.cash + cafeCash + debtCash + chargeCash + totalTournamentIncome;
-    let totalCardIn = consoleCalc.card + billiardCalc.card + pcCalc.card + cafeCard + debtCard + chargeCard;
+    let totalCashIn = consoleCalc.cash + consoleBlock.cash + billiardCalc.cash + billiardBlock.cash + pcCalc.cash + cafeCash + debtCash + chargeCash + tournamentCash;
+    let totalCardIn = consoleCalc.card + consoleBlock.card + billiardCalc.card + billiardBlock.card + pcCalc.card + cafeCard + debtCard + chargeCard + tournamentCard;
     let totalCashOut = purchaseCash;
     let totalCardOut = purchaseCard;
 
@@ -72,16 +96,16 @@ const Reports = (function () {
         <div class="report-section">
           <h4>کنسول‌ها</h4>
           <div class="report-summary">
-            <div class="summary-item"><div class="summary-label">نقدی</div><div class="summary-value">${Utils.formatCurrency(consoleCalc.cash)}</div></div>
-            <div class="summary-item"><div class="summary-label">کارتی</div><div class="summary-value">${Utils.formatCurrency(consoleCalc.card)}</div></div>
+            <div class="summary-item"><div class="summary-label">نقدی</div><div class="summary-value">${Utils.formatCurrency(consoleCalc.cash + consoleBlock.cash)}</div></div>
+            <div class="summary-item"><div class="summary-label">کارتی</div><div class="summary-value">${Utils.formatCurrency(consoleCalc.card + consoleBlock.card)}</div></div>
           </div>
         </div>
 
         <div class="report-section">
           <h4>بیلیارد</h4>
           <div class="report-summary">
-            <div class="summary-item"><div class="summary-label">نقدی</div><div class="summary-value">${Utils.formatCurrency(billiardCalc.cash)}</div></div>
-            <div class="summary-item"><div class="summary-label">کارتی</div><div class="summary-value">${Utils.formatCurrency(billiardCalc.card)}</div></div>
+            <div class="summary-item"><div class="summary-label">نقدی</div><div class="summary-value">${Utils.formatCurrency(billiardCalc.cash + billiardBlock.cash)}</div></div>
+            <div class="summary-item"><div class="summary-label">کارتی</div><div class="summary-value">${Utils.formatCurrency(billiardCalc.card + billiardBlock.card)}</div></div>
           </div>
         </div>
 
@@ -117,11 +141,12 @@ const Reports = (function () {
           </div>
         </div>
 
-        ${dailyTournaments.length > 0 ? `
+        ${(tournamentCash + tournamentCard) > 0 ? `
         <div class="report-section">
-          <h4>مسابقات (${dailyTournaments.length})</h4>
+          <h4>مسابقات</h4>
           <div class="report-summary">
-            <div class="summary-item"><div class="summary-label">درآمد حق ورود</div><div class="summary-value">${Utils.formatCurrency(totalTournamentIncome)}</div></div>
+            <div class="summary-item"><div class="summary-label">نقدی حق ورود</div><div class="summary-value">${Utils.formatCurrency(tournamentCash)}</div></div>
+            <div class="summary-item"><div class="summary-label">کارتی حق ورود</div><div class="summary-value">${Utils.formatCurrency(tournamentCard)}</div></div>
             <div class="summary-item"><div class="summary-label">بازی‌های تکمیل‌شده</div><div class="summary-value">${activeMatches.length}</div></div>
           </div>
         </div>
@@ -181,13 +206,21 @@ const Reports = (function () {
     let sessions = await DB.getAll("sessions");
     let cafeOrders = await DB.getAll("cafeOrders");
     let debtPayments = await DB.getAll("debtPayments");
+    let blockPayments = await DB.getAll("blockPayments");
 
     let tournaments = await DB.getAll("tournaments");
     let matches = await DB.getAll("matches");
-    let dailyTournaments = tournaments.filter((t) => Utils.isInRange(t.createdAt, range.start, range.end));
     let activeMatches = matches.filter((m) => m.status === "completed" && m.timerEnd && Utils.isInRange(m.timerEnd, range.start, range.end));
-    let totalTournamentIncome = dailyTournaments.reduce((s, t) => s + (t.entryFee || 0) * (t.participants || []).length, 0);
-    let totalDeviceCost = activeMatches.reduce((s, m) => s + (m.deviceCost || 0), 0);
+    let tournamentCash = 0, tournamentCard = 0;
+    tournaments.forEach((t) => {
+      if (!t.entryFeeStatus) return;
+      Object.values(t.entryFeeStatus).forEach((efs) => {
+        if (efs.collected && efs.settledAt && Utils.isInRange(efs.settledAt, range.start, range.end)) {
+          if (efs.payType === "cash") tournamentCash += t.entryFee || 0;
+          else if (efs.payType === "card") tournamentCard += t.entryFee || 0;
+        }
+      });
+    });
 
     let walletCharges = await DB.getAll("walletCharges");
     let dailyCharges = walletCharges.filter((c) => Utils.isInRange(c.date, range.start, range.end));
@@ -198,9 +231,10 @@ const Reports = (function () {
       ...sessions.filter((s) => s.status === "settled" && s.settledAt && Utils.isInRange(s.settledAt, range.start, range.end)).map((s) => ({ payType: s.settlePayType, amount: s.settleAmount || 0 })),
       ...cafeOrders.filter((o) => Utils.isInRange(o.createdAt, range.start, range.end)).map((o) => ({ payType: o.payType, amount: o.total })),
       ...debtPayments.filter((p) => Utils.isInRange(p.date, range.start, range.end)).map((d) => ({ payType: d.paymentType, amount: d.amount })),
+      ...blockPayments.filter((bp) => Utils.isInRange(bp.date, range.start, range.end)).map((bp) => ({ payType: bp.payType, amount: bp.amount })),
     ];
 
-    let totalCash = chargeCash + totalTournamentIncome, totalCard = chargeCard;
+    let totalCash = chargeCash + tournamentCash, totalCard = chargeCard + tournamentCard;
     allTransactions.forEach((t) => { if (t.payType === "cash") totalCash += t.amount; else if (t.payType === "card") totalCard += t.amount; });
 
     el.innerHTML = `
@@ -311,6 +345,7 @@ const Reports = (function () {
     let sessions = await DB.getAll("sessions");
     let cafeOrders = await DB.getAll("cafeOrders");
     let debtPayments = await DB.getAll("debtPayments");
+    let blockPayments = await DB.getAll("blockPayments");
     let customers = await DB.getAll("customers");
     let devices = await DB.getAll("devices");
 
@@ -323,6 +358,11 @@ const Reports = (function () {
     cafeOrders.filter((o) => Utils.isInRange(o.createdAt, range.start, range.end)).forEach((o) => {
       let c = customers.find((cu) => cu.id === o.customerId);
       all.push({ txType: "order", txId: o.id, type: "کافی‌شاپ", device: "-", amount: o.total, payType: o.payType, time: o.createdAt, ids: c ? "#" + (c.displayId || c.id) : "-" });
+    });
+    blockPayments.filter((bp) => Utils.isInRange(bp.date, range.start, range.end)).forEach((bp) => {
+      let device = devices.find((d) => d.id === bp.deviceId);
+      let c = customers.find((cu) => cu.id === bp.customerId);
+      all.push({ txType: "blockPayment", txId: bp.id, type: "تسویه بلوک", device: device ? device.name : "-", amount: bp.amount || 0, payType: bp.payType, time: bp.date, ids: c ? "#" + (c.displayId || c.id) : "-" });
     });
 
     let tournaments = await DB.getAll("tournaments");
@@ -460,6 +500,7 @@ const Reports = (function () {
     let range = Utils.getReportRange();
     let sessions = await DB.getAll("sessions");
     let cafeOrders = await DB.getAll("cafeOrders");
+    let blockPayments = await DB.getAll("blockPayments");
     let customers = await DB.getAll("customers");
     let devices = await DB.getAll("devices");
     let data = [];
@@ -471,6 +512,11 @@ const Reports = (function () {
     cafeOrders.filter((o) => Utils.isInRange(o.createdAt, range.start, range.end)).forEach((o) => {
       let c = customers.find((cu) => cu.id === o.customerId);
       data.push({ "نوع": "کافی‌شاپ", "دستگاه": "-", "شناسه‌ها": c ? "#" + (c.displayId || c.id) : "", "مبلغ": o.total, "روش": o.payType, "تاریخ": Jalali.formatDateTime(o.createdAt), "تسویه‌کننده": "" });
+    });
+    blockPayments.filter((bp) => Utils.isInRange(bp.date, range.start, range.end)).forEach((bp) => {
+      let device = devices.find((d) => d.id === bp.deviceId);
+      let c = customers.find((cu) => cu.id === bp.customerId);
+      data.push({ "نوع": "تسویه بلوک", "دستگاه": device ? device.name : "", "شناسه‌ها": c ? "#" + (c.displayId || c.id) : "", "مبلغ": bp.amount, "روش": bp.payType, "تاریخ": Jalali.formatDateTime(bp.date), "تسویه‌کننده": bp.settlerName || "" });
     });
     let ws = XLSX.utils.json_to_sheet(data);
     let wb = XLSX.utils.book_new();
@@ -487,12 +533,16 @@ const Reports = (function () {
     let lastDay = new Date(firstDay); lastDay.setDate(lastDay.getDate() + monthDays);
     let sessions = await DB.getAll("sessions");
     let cafeOrders = await DB.getAll("cafeOrders");
+    let blockPayments = await DB.getAll("blockPayments");
     let data = [];
     sessions.filter((s) => s.status === "settled" && s.settledAt && Utils.isInRange(s.settledAt, firstDay, lastDay)).forEach((s) => {
       data.push({ "نوع": s.deviceType, "مبلغ": s.settleAmount, "روش": s.settlePayType, "تاریخ": Jalali.formatDateTime(s.settledAt) });
     });
     cafeOrders.filter((o) => Utils.isInRange(o.createdAt, firstDay, lastDay)).forEach((o) => {
       data.push({ "نوع": "کافی‌شاپ", "مبلغ": o.total, "روش": o.payType, "تاریخ": Jalali.formatDateTime(o.createdAt) });
+    });
+    blockPayments.filter((bp) => Utils.isInRange(bp.date, firstDay, lastDay)).forEach((bp) => {
+      data.push({ "نوع": "تسویه بلوک", "مبلغ": bp.amount, "روش": bp.payType, "تاریخ": Jalali.formatDateTime(bp.date) });
     });
     let ws = XLSX.utils.json_to_sheet(data);
     let wb = XLSX.utils.book_new();

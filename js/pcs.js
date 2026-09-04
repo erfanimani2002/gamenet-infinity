@@ -257,6 +257,11 @@ const PCs = (function () {
         await Reports.reversePayment(session.ids[0], b.price || 0, b.settlePayType);
       }
     }
+    // Remove block payment records
+    let allBp = await DB.getAll("blockPayments");
+    for (let bp of allBp.filter((bp) => bp.sessionId === session.id)) {
+      await DB.remove("blockPayments", bp.id);
+    }
 
     await DB.remove("sessions", session.id);
     await DB.put("devices", { ...await DB.get("devices", deviceId), status: "free" });

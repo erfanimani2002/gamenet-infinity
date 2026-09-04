@@ -50,6 +50,8 @@ const Staff = (function () {
   async function startShift(staffId) {
     let staff = await DB.get("staff", staffId);
     if (!staff.shifts) staff.shifts = [];
+    let active = staff.shifts.find((s) => !s.end);
+    if (active) { App.toast("این پرسنل از قبل شیفت باز دارد"); return; }
     staff.shifts.push({ start: new Date().toISOString(), end: null });
     await DB.put("staff", staff);
     await DB.logActivity("شروع شیفت", staff.name);

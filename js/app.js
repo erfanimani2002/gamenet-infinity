@@ -26,7 +26,7 @@ const App = (function () {
       id: "reports", label: "گزارش‌ها", items: [
         { tab: "reports", icon: "📊", label: "گزارش روزانه" },
         { tab: "instantReport", icon: "⚡", label: "گزارش لحظه‌ای" },
-        { tab: "monthlyReport", icon: "📅", label: "گزارش ماهانه", managerOnly: true },
+        { tab: "monthlyReport", icon: "📅", label: "گزارش ماهانه" },
         { tab: "activityLog", icon: "📋", label: "لاگ فعالیت" },
       ],
     },
@@ -36,7 +36,7 @@ const App = (function () {
         { tab: "inventory", icon: "📦", label: "موجودی" },
         { tab: "staff", icon: "👥", label: "پرسنل" },
         { tab: "backup", icon: "💾", label: "پشتیبان‌گیری" },
-        { tab: "adminPanel", icon: "⚙️", label: "پنل مدیریت", managerOnly: true },
+        { tab: "adminPanel", icon: "⚙️", label: "پنل مدیریت" },
       ],
     },
     {
@@ -74,14 +74,13 @@ const App = (function () {
   }
 
   function renderSidebar() {
-    let isMgr = Auth.isManager();
     let html = SIDEBAR.filter((g) => {
       if (g.id === "reports" || g.id === "management") {
-        return g.items.some((item) => !item.managerOnly || isMgr);
+        return g.items.some((item) => Auth.canAccess(item.tab));
       }
       return true;
     }).map((group) => {
-      let visibleItems = group.items.filter((item) => !item.managerOnly || isMgr);
+      let visibleItems = group.items.filter((item) => Auth.canAccess(item.tab));
       if (visibleItems.length === 0) return "";
       return `
         <div class="sidebar-group">
