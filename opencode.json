@@ -1,0 +1,68 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "provider": {
+    "avalai": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "AvalAI",
+      "options": {
+        "baseURL": "https://api.avalai.ir/v1"
+      },
+      "models": {
+        "claude-opus-5": {
+          "name": "Claude Opus 5"
+        },
+        "claude-sonnet-5": {
+          "name": "Claude Sonnet 5"
+        },
+        "claude-fable-5": {
+          "name": "Claude Fable 5"
+        },
+        "claude-opus-4-8": {
+          "name": "Claude Opus 4.8"
+        },
+        "claude-opus-4-7": {
+          "name": "Claude Opus 4.7"
+        },
+        "claude-opus-4-6": {
+          "name": "Claude Opus 4.6"
+        },
+        "claude-opus-4-5": {
+          "name": "Claude Opus 4.5"
+        },
+        "claude-sonnet-4-6": {
+          "name": "Claude Sonnet 4.6"
+        },
+        "claude-sonnet-4-5": {
+          "name": "Claude Sonnet 4.5"
+        },
+        "claude-haiku-4-5": {
+          "name": "Claude Haiku 4.5"
+        },
+        "deepseek-v4-pro": {
+          "name": "DeepSeek V4 Pro"
+        },
+        "deepseek-v4-flash": {
+          "name": "DeepSeek V4 Flash"
+        },
+        "deepseek-v3.2": {
+          "name": "DeepSeek V3.2"
+        },
+        "deepseek-v3.2-speciale": {
+          "name": "DeepSeek V3.2 Speciale"
+        },
+        "deepseek-v3.1": {
+          "name": "DeepSeek V3.1"
+        },
+        "deepseek-reasoner": {
+          "name": "DeepSeek Reasoner"
+        },
+        "deepseek-chat": {
+          "name": "DeepSeek Chat"
+        },
+        "deepseek-coder": {
+          "name": "DeepSeek Coder"
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>گیمنت اینفینیتی</title>
+  <link rel="stylesheet" href="css/style.css">
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Vazirmatn:wght@300;400;500;600;700&display=swap');
+  </style>
+</head>
+<body>
+
+  <div id="loginScreen">
+    <div class="login-box">
+      <img src="img/logo.webp" alt="لوگو" style="height:80px;margin-bottom:12px;">
+      <h1>گیمنت اینفینیتی</h1>
+      <p class="subtitle">سیستم مدیریت مجموعه گیم‌نت</p>
+      <input type="text" id="loginUser" placeholder="نام کاربری" autocomplete="off">
+      <input type="password" id="loginPass" placeholder="رمز عبور">
+      <button type="button" onclick="App.doLogin()">ورود</button>
+      <div id="loginError" class="login-error"></div>
+    </div>
+  </div>
+
+  <div id="appScreen">
+    <div class="sidebar" id="sidebar">
+      <nav class="sidebar-menu" id="sidebarMenu"></nav>
+      <div class="sidebar-footer">
+        <button class="theme-toggle" onclick="App.toggleTheme()" id="themeToggle">
+          <span id="themeIcon">☀️</span>
+          <span id="themeLabel">حالت تاریک</span>
+        </button>
+        <div class="user-dropdown" id="userDropdown" onclick="App.toggleUserMenu()">
+          <span id="userDisplay"></span>
+          <span class="role-badge" id="roleDisplay"></span>
+          <span class="dropdown-arrow">&#9662;</span>
+        </div>
+        <div class="user-menu" id="userMenu" style="display:none">
+          <button class="btn-logout" onclick="App.doLogout()">خروج</button>
+        </div>
+        <div class="sidebar-logo">
+          <img src="img/logo.webp" alt="گیمنت اینفینیتی" style="height:28px;">
+          <span>گیمنت اینفینیتی</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="main-content">
+      <div id="tab-consoles" class="tab-content active"></div>
+      <div id="tab-billiard" class="tab-content"></div>
+      <div id="tab-pcs" class="tab-content"></div>
+      <div id="tab-cafe" class="tab-content"></div>
+      <div id="tab-games" class="tab-content"></div>
+      <div id="tab-customers" class="tab-content"></div>
+      <div id="tab-debts" class="tab-content"></div>
+      <div id="tab-reports" class="tab-content"></div>
+      <div id="tab-instantReport" class="tab-content"></div>
+      <div id="tab-monthlyReport" class="tab-content"></div>
+      <div id="tab-activityLog" class="tab-content"></div>
+      <div id="tab-purchases" class="tab-content"></div>
+      <div id="tab-inventory" class="tab-content"></div>
+      <div id="tab-staff" class="tab-content"></div>
+      <div id="tab-backup" class="tab-content"></div>
+      <div id="tab-adminPanel" class="tab-content"></div>
+      <div id="tab-tournaments" class="tab-content"></div>
+    </div>
+  </div>
+
+  <div class="modal-overlay" id="modalOverlay" onclick="App.closeModal(event)">
+    <div class="modal" id="modalContent" onclick="event.stopPropagation()"></div>
+  </div>
+
+  <div id="toast" class="toast" style="display:none"></div>
+
+  <script src="lib/xlsx.full.min.js"></script>
+  <script src="js/jalali.js"></script>
+  <script src="js/db.js"></script>
+  <script src="js/utils.js"></script>
+  <script src="js/auth.js"></script>
+  <script src="js/customers.js"></script>
+  <script src="js/consoles.js"></script>
+  <script src="js/billiard.js"></script>
+  <script src="js/pcs.js"></script>
+  <script src="js/cafe.js"></script>
+  <script src="js/reports.js"></script>
+  <script src="js/debts.js"></script>
+  <script src="js/inventory.js"></script>
+  <script src="js/penalties.js"></script>
+  <script src="js/purchases.js"></script>
+  <script src="js/staff.js"></script>
+  <script src="js/backup.js"></script>
+  <script src="js/activity-log.js"></script>
+  <script src="js/admin-panel.js"></script>
+  <script src="js/games.js"></script>
+  <script src="js/tournaments.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
