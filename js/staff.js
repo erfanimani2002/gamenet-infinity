@@ -13,7 +13,7 @@ const Staff = (function () {
           <div class="list-row" style="flex-wrap:wrap;gap:8px;">
             <span class="row-value" style="font-weight:600;min-width:100px">${Utils.escapeHtml(s.name)}</span>
             <span class="row-value">
-              ${(s.shifts || []).find((sh) => !sh.end && new Date(sh.start).toDateString() === new Date().toDateString()) ?
+              ${(s.shifts || []).find((sh) => !sh.end) ?
                 `<span class="status-badge status-busy">در حال کار</span>
                  <button class="btn btn-sm btn-warning" onclick="Staff.endShift(${s.id})">پایان کار</button>` :
                 `<span class="status-badge status-free">آزاد</span>
@@ -116,7 +116,7 @@ const Staff = (function () {
 
   async function showActivityTab(staffId) {
     let staff = await DB.get("staff", staffId);
-    let todayShift = (staff.shifts || []).find((s) => !s.end && new Date(s.start).toDateString() === new Date().toDateString());
+    let todayShift = (staff.shifts || []).find((s) => !s.end);
 
     let cafeItems = await DB.getAll("cafeItems");
 
@@ -125,14 +125,14 @@ const Staff = (function () {
         <div style="margin-bottom:12px;">
           ${todayShift ?
             `<span class="status-badge status-busy">در حال کار از ${Jalali.timeString(new Date(todayShift.start))}</span>
-             <button class="btn btn-sm btn-warning" onclick="Staff.endShift(${staffId}); Staff.showActivityTab(${staffId});">پایان کار</button>` :
+             <button class="btn btn-sm btn-warning" onclick="Staff.endShiftAndRefreshTab(${staffId})">پایان کار</button>` :
             `<span class="status-badge status-free">آزاد</span>
-             <button class="btn btn-sm btn-success" onclick="Staff.startShift(${staffId}); Staff.showActivityTab(${staffId});">شروع کار</button>`
+             <button class="btn btn-sm btn-success" onclick="Staff.startShiftAndRefreshTab(${staffId})">شروع کار</button>`
           }
         </div>
         <h3>افزودن مصرف</h3>
         <div class="item-grid">
-          ${cafeItems.map((item) => `<div class="item-card" onclick="Staff.addConsumption(${staffId}, ${item.id}); Staff.showActivityTab(${staffId});"><div class="item-name">${Utils.escapeHtml(item.name)}</div><div class="item-price">${Utils.formatCurrency(item.price)}</div></div>`).join("")}
+          ${cafeItems.map((item) => `<div class="item-card" onclick="Staff.addConsumptionAndRefreshTab(${staffId}, ${item.id})"><div class="item-name">${Utils.escapeHtml(item.name)}</div><div class="item-price">${Utils.formatCurrency(item.price)}</div></div>`).join("")}
         </div>
         <h3 style="margin-top:12px">آخرین مصرف‌ها</h3>
         ${(staff.consumption || []).slice(-5).reverse().map((c) => `<div class="block-item"><span>${Utils.escapeHtml(c.name)} x${c.qty} - ${Utils.formatCurrency(c.price * c.qty)}</span><span class="text-muted text-sm">${Jalali.formatDateTime(c.date)}</span></div>`).join("") || '<div class="text-muted text-sm">بدون مصرف</div>'}
@@ -205,7 +205,11 @@ const Staff = (function () {
     App.toast("مصرف ثبت شد");
   }
 
+  async function startShiftAndRefreshTab(staffId) { await startShift(staffId); await showActivityTab(staffId); }
+  async function endShiftAndRefreshTab(staffId) { await endShift(staffId); await showActivityTab(staffId); }
+  async function addConsumptionAndRefreshTab(staffId, itemId) { await addConsumption(staffId, itemId); await showActivityTab(staffId); }
+
   function refresh() { let el = document.getElementById("tab-staff"); if (el && el.classList.contains("active")) render(el); }
 
-  return { render, showAddStaff, saveStaff, startShift, endShift, showStaffDetail, showActivityTab, showStatsTab, addConsumption, refresh };
+  return { render, showAddStaff, saveStaff, startShift, endShift, showStaffDetail, showActivityTab, showStatsTab, addConsumption, startShiftAndRefreshTab, endShiftAndRefreshTab, addConsumptionAndRefreshTab, refresh };
 })();

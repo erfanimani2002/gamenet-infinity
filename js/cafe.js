@@ -55,32 +55,22 @@ const Cafe = (function () {
   async function addToCart(itemId) {
     let item = await DB.get("cafeItems", itemId);
     if (!item) return;
-    if (!item.unlimited && item.stock <= 0) {
+    let existing = cart.find((c) => c.id === itemId);
+    let qtyInCart = existing ? existing.qty : 0;
+    if (!item.unlimited && item.stock <= qtyInCart) {
       App.toast("موجودی تمام شده");
       return;
     }
-    let existing = cart.find((c) => c.id === itemId);
     if (existing) {
       existing.qty++;
     } else {
       cart.push({ id: itemId, name: item.name, price: item.price, qty: 1 });
-    }
-    if (!item.unlimited) {
-      item.stock--;
-      await DB.put("cafeItems", item);
     }
     updateCartDisplay();
     App.toast("به سبد اضافه شد");
   }
 
   function removeFromCart(index) {
-    let item = cart[index];
-    DB.get("cafeItems", item.id).then((cafeItem) => {
-      if (cafeItem && !cafeItem.unlimited) {
-        cafeItem.stock += item.qty;
-        DB.put("cafeItems", cafeItem);
-      }
-    });
     cart.splice(index, 1);
     updateCartDisplay();
   }
@@ -159,6 +149,16 @@ const Cafe = (function () {
     let payType = document.getElementById("cafePayType").value;
     let total = cart.reduce((sum, item) => sum + (item.price * item.qty), 0);
 
+    // Re-check stock at the moment of checkout (it may have changed since items were added to the cart)
+    let cafeItemsNow = await DB.getAll("cafeItems");
+    for (let cartItem of cart) {
+      let dbItem = cafeItemsNow.find((i) => i.id === cartItem.id);
+      if (dbItem && !dbItem.unlimited && dbItem.stock < cartItem.qty) {
+        App.toast("موجودی «" + dbItem.name + "» کافی نیست");
+        return;
+      }
+    }
+
     if (payType === "wallet") {
       let customer = await DB.get("customers", selectedCustomerId);
       if (!customer) { App.toast("مشتری یافت نشد"); return; }
@@ -183,6 +183,14 @@ const Cafe = (function () {
       if (customer) {
         customer.totalPaid = (customer.totalPaid || 0) + total;
         await DB.put("customers", customer);
+      }
+    }
+
+    for (let cartItem of cart) {
+      let dbItem = cafeItemsNow.find((i) => i.id === cartItem.id);
+      if (dbItem && !dbItem.unlimited) {
+        dbItem.stock -= cartItem.qty;
+        await DB.put("cafeItems", dbItem);
       }
     }
 
