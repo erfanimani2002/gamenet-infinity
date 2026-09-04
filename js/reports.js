@@ -200,7 +200,7 @@ const Reports = (function () {
       ...debtPayments.filter((p) => Utils.isInRange(p.date, range.start, range.end)).map((d) => ({ payType: d.paymentType, amount: d.amount })),
     ];
 
-    let totalCash = chargeCash + totalTournamentIncome, totalCard = 0;
+    let totalCash = chargeCash + totalTournamentIncome, totalCard = chargeCard;
     allTransactions.forEach((t) => { if (t.payType === "cash") totalCash += t.amount; else if (t.payType === "card") totalCard += t.amount; });
 
     el.innerHTML = `

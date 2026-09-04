@@ -15,10 +15,17 @@ const Utils = (function () {
 
   function getCurrentReportRange(now) {
     let d = now instanceof Date ? now : new Date();
-    let yesterday = new Date(d);
-    yesterday.setDate(yesterday.getDate() - 1);
-    yesterday.setHours(23, 35, 0, 0);
-    return { start: yesterday, end: d };
+    let today = new Date(d);
+    today.setHours(23, 35, 0, 0);
+    let start;
+    if (d >= today) {
+      start = today;
+    } else {
+      start = new Date(d);
+      start.setDate(start.getDate() - 1);
+      start.setHours(23, 35, 0, 0);
+    }
+    return { start, end: d };
   }
 
   function roundPrice(price, unit) {
