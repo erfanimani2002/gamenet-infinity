@@ -55,32 +55,22 @@ const Cafe = (function () {
   async function addToCart(itemId) {
     let item = await DB.get("cafeItems", itemId);
     if (!item) return;
-    if (!item.unlimited && item.stock <= 0) {
+    let existing = cart.find((c) => c.id === itemId);
+    let qtyAlreadyInCart = existing ? existing.qty : 0;
+    if (!item.unlimited && item.stock <= qtyAlreadyInCart) {
       App.toast("موجودی تمام شده");
       return;
     }
-    let existing = cart.find((c) => c.id === itemId);
     if (existing) {
       existing.qty++;
     } else {
       cart.push({ id: itemId, name: item.name, price: item.price, qty: 1 });
-    }
-    if (!item.unlimited) {
-      item.stock--;
-      await DB.put("cafeItems", item);
     }
     updateCartDisplay();
     App.toast("به سبد اضافه شد");
   }
 
   function removeFromCart(index) {
-    let item = cart[index];
-    DB.get("cafeItems", item.id).then((cafeItem) => {
-      if (cafeItem && !cafeItem.unlimited) {
-        cafeItem.stock += item.qty;
-        DB.put("cafeItems", cafeItem);
-      }
-    });
     cart.splice(index, 1);
     updateCartDisplay();
   }
@@ -158,6 +148,24 @@ const Cafe = (function () {
     }
     let payType = document.getElementById("cafePayType").value;
     let total = cart.reduce((sum, item) => sum + (item.price * item.qty), 0);
+
+    // Stock is reserved only at checkout, not at add-to-cart time, so re-check
+    // and deduct it here — right before the order is finalized — to avoid
+    // leaking inventory on abandoned carts.
+    for (let cartItem of cart) {
+      let dbItem = await DB.get("cafeItems", cartItem.id);
+      if (dbItem && !dbItem.unlimited && dbItem.stock < cartItem.qty) {
+        App.toast("موجودی «" + dbItem.name + "» کافی نیست");
+        return;
+      }
+    }
+    for (let cartItem of cart) {
+      let dbItem = await DB.get("cafeItems", cartItem.id);
+      if (dbItem && !dbItem.unlimited) {
+        dbItem.stock -= cartItem.qty;
+        await DB.put("cafeItems", dbItem);
+      }
+    }
 
     if (payType === "wallet") {
       let customer = await DB.get("customers", selectedCustomerId);

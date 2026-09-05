@@ -226,16 +226,43 @@ const Tournaments = (function () {
   }
 
   async function deleteTournament(id) {
-    if (!confirm("آیا از حذف این مسابقه مطمئن هستید؟")) return;
     let t = await DB.get("tournaments", id);
+    if (!t) { App.toast("مسابقه یافت نشد"); return; }
+    if (!confirm("آیا از حذف این مسابقه مطمئن هستید؟ مبالغ تسویه‌شده و حق ورودهای دریافت‌شده به مشتریان بازگردانده می‌شود.")) return;
+
     let matches;
     try { matches = await DB.getByIndex("matches", "by_tournament", id); } catch (e) { matches = (await DB.getAll("matches")).filter((m) => m.tournamentId === id); }
+
+    // Reverse settled match payments before deleting the matches themselves.
+    let allBp = await DB.getAll("blockPayments");
+    for (let m of matches) {
+      if (!m.settled) continue;
+      let bp = allBp.find((r) => r.deviceType === "tournament" && r.matchId === m.id);
+      if (bp) {
+        await Reports.reversePayment(bp.customerId, bp.amount, bp.payType);
+        await DB.remove("blockPayments", bp.id);
+      } else {
+        // Fall back to the match loser for records predating blockPayments tracking.
+        let loserId = m.winner ? (m.winner === m.playerA ? m.playerB : m.playerA) : (m.playerA || m.playerB);
+        if (loserId) await Reports.reversePayment(loserId, m.settleAmount || 0, m.settlePayType || "cash");
+      }
+    }
     for (let m of matches) await DB.remove("matches", m.id);
+
+    // Reverse collected entry fees.
+    if (t.entryFeeStatus) {
+      for (let participantId in t.entryFeeStatus) {
+        let efs = t.entryFeeStatus[participantId];
+        if (!efs || !efs.collected) continue;
+        await Reports.reversePayment(efs.payerId || parseInt(participantId), t.entryFee, efs.payType);
+      }
+    }
+
     let parts;
     try { parts = await DB.getByIndex("tournamentParticipants", "by_tournament", id); } catch (e) { parts = []; }
     for (let p of parts) await DB.remove("tournamentParticipants", p.id);
     await DB.remove("tournaments", id);
-    await DB.logActivity("حذف مسابقه", t.name);
+    await DB.logActivity("حذف مسابقه", t.name + " — مبالغ تسویه‌شده و حق ورودها بازگردانده شد");
     App.toast("مسابقه حذف شد");
     refresh();
   }
@@ -958,7 +985,7 @@ const Tournaments = (function () {
     }
 
     if (!t.entryFeeStatus) t.entryFeeStatus = {};
-    t.entryFeeStatus[participantId] = { collected: true, payType, settlerName, settledAt: new Date().toISOString() };
+    t.entryFeeStatus[participantId] = { collected: true, payerId, payType, settlerName, settledAt: new Date().toISOString() };
     await DB.put("tournaments", t);
 
     await DB.logActivity("دریافت حق ورود مسابقه", t.name + " — " + Utils.formatCurrency(t.entryFee));
@@ -1031,6 +1058,12 @@ const Tournaments = (function () {
     match.settlerName = settlerName;
     match.settledAt = new Date().toISOString();
     await DB.put("matches", match);
+    await DB.add("blockPayments", {
+      customerId: payerId, sessionId: null, matchId: match.id,
+      deviceId: match.deviceId || null, deviceType: "tournament", blockIndex: null,
+      amount: total, payType: payType, settlerName: settlerName,
+      date: match.settledAt,
+    });
 
     let tournament = await DB.get("tournaments", match.tournamentId);
     await DB.logActivity("تسویه بازی مسابقه", (tournament ? tournament.name : '') + " — " + Utils.formatCurrency(total));
@@ -1089,6 +1122,12 @@ const Tournaments = (function () {
       m.settlerName = "تسویه خودکار";
       m.settledAt = new Date().toISOString();
       await DB.put("matches", m);
+      await DB.add("blockPayments", {
+        customerId: loserId, sessionId: null, matchId: m.id,
+        deviceId: m.deviceId || null, deviceType: "tournament", blockIndex: null,
+        amount: total, payType: payType, settlerName: "تسویه خودکار",
+        date: m.settledAt,
+      });
       settledCount++;
     }
 

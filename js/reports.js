@@ -36,10 +36,11 @@ const Reports = (function () {
 
     let consoleBlock = { cash: 0, card: 0 };
     let billiardBlock = { cash: 0, card: 0 };
+    let tournamentMatchBlock = { cash: 0, card: 0 };
     let dailyBlockPayments = blockPayments.filter((bp) => Utils.isInRange(bp.date, range.start, range.end));
     dailyBlockPayments.forEach((bp) => {
       let amt = bp.amount || 0;
-      let target = bp.deviceType === "console" ? consoleBlock : billiardBlock;
+      let target = bp.deviceType === "console" ? consoleBlock : bp.deviceType === "tournament" ? tournamentMatchBlock : billiardBlock;
       if (bp.payType === "cash") target.cash += amt;
       else if (bp.payType === "card") target.card += amt;
     });
@@ -77,6 +78,8 @@ const Reports = (function () {
         }
       });
     });
+    tournamentCash += tournamentMatchBlock.cash;
+    tournamentCard += tournamentMatchBlock.card;
 
     // Prize payouts paid out as cash/card are cash-outs, the same way purchases
     // are. A payout credited to the winner's wallet doesn't leave the till, so
@@ -413,21 +416,9 @@ const Reports = (function () {
     blockPayments.filter((bp) => Utils.isInRange(bp.date, range.start, range.end)).forEach((bp) => {
       let device = devices.find((d) => d.id === bp.deviceId);
       let c = customers.find((cu) => cu.id === bp.customerId);
-      all.push({ txType: "blockPayment", txId: bp.id, type: "تسویه بلوک", device: device ? device.name : "-", amount: bp.amount || 0, payType: bp.payType, time: bp.date, ids: c ? "#" + (c.displayId || c.id) : "-" });
+      all.push({ txType: "blockPayment", txId: bp.id, type: bp.deviceType === "tournament" ? "تسویه بازی مسابقه" : "تسویه بلوک", device: device ? device.name : "-", amount: bp.amount || 0, payType: bp.payType, time: bp.date, ids: c ? "#" + (c.displayId || c.id) : "-" });
     });
 
-    let tournaments = await DB.getAll("tournaments");
-    let matchData = await DB.getAll("matches");
-    tournaments.filter((t) => t.status === "completed" && t.createdAt && Utils.isInRange(t.createdAt, range.start, range.end)).forEach((t) => {
-      let completedMatches = matchData.filter((m) => m.tournamentId === t.id && m.status === "completed");
-      completedMatches.forEach((m) => {
-        let cA = customers.find((cu) => cu.id === m.playerA);
-        let cB = customers.find((cu) => cu.id === m.playerB);
-        let nameA = cA ? "#" + (cA.displayId || cA.id) : "-";
-        let nameB = cB ? "#" + (cB.displayId || cB.id) : "-";
-        all.push({ txType: "match", txId: m.id, type: "مسابقه", device: t.name, amount: m.deviceCost || 0, payType: "tournament", time: m.timerEnd || t.createdAt, ids: nameA + " vs " + nameB });
-      });
-    });
     all.sort((a, b) => new Date(b.time) - new Date(a.time));
 
     App.openModal(`<h2>لیست تراکنش‌ها</h2><div style="max-height:400px;overflow-y:auto;">
@@ -444,14 +435,23 @@ const Reports = (function () {
         let device = devices.find((d) => d.id === s.deviceId);
         let customers = await DB.getAll("customers");
         let idsText = (s.ids || []).map((id) => { let c = customers.find((cu) => cu.id === id); return "#" + (c ? (c.displayId || c.id) : id); }).join(", ");
-        t = { type: "session", session: s, typeName: s.deviceType === "console" ? "کنسول" : s.deviceType === "billiard" ? "بیلیارد" : "پی‌سی", device: device ? device.name : "-", amount: s.settleAmount || 0, payType: s.settlePayType, ids: idsText };
+        t = { type: "session", id: s.id, typeName: s.deviceType === "console" ? "کنسول" : s.deviceType === "billiard" ? "بیلیارد" : "پی‌سی", device: device ? device.name : "-", amount: s.settleAmount || 0, payType: s.settlePayType, ids: idsText };
+      }
+    } else if (txType === "blockPayment") {
+      let bp = await DB.get("blockPayments", txId);
+      if (bp) {
+        let devices = await DB.getAll("devices");
+        let device = devices.find((d) => d.id === bp.deviceId);
+        let customers = await DB.getAll("customers");
+        let c = customers.find((cu) => cu.id === bp.customerId);
+        t = { type: "blockPayment", id: bp.id, typeName: bp.deviceType === "tournament" ? "تسویه بازی مسابقه" : bp.deviceType === "console" ? "تسویه بلوک کنسول" : "تسویه بلوک بیلیارد", device: device ? device.name : "-", amount: bp.amount || 0, payType: bp.payType, ids: c ? "#" + (c.displayId || c.id) : "-" };
       }
     } else {
       let o = await DB.get("cafeOrders", txId);
       if (o) {
         let customers = await DB.getAll("customers");
         let c = customers.find((cu) => cu.id === o.customerId);
-        t = { type: "order", order: o, typeName: "کافی‌شاپ", device: "-", amount: o.total, payType: o.payType, ids: c ? "#" + (c.displayId || c.id) : "-" };
+        t = { type: "order", id: o.id, typeName: "کافی‌شاپ", device: "-", amount: o.total, payType: o.payType, ids: c ? "#" + (c.displayId || c.id) : "-" };
       }
     }
     if (!t) return;
@@ -462,8 +462,8 @@ const Reports = (function () {
       <div class="form-group"><label>مبلغ</label><input type="number" id="editTxAmount" value="${t.amount}" min="0"></div>
       <div class="form-group"><label>روش پرداخت</label><select id="editTxPayType"><option value="cash" ${t.payType === 'cash' ? 'selected' : ''}>نقدی</option><option value="card" ${t.payType === 'card' ? 'selected' : ''}>کارتی</option><option value="wallet" ${t.payType === 'wallet' ? 'selected' : ''}>کیف‌پول</option><option value="debt" ${t.payType === 'debt' ? 'selected' : ''}>بدهکاری</option></select></div>
       <div class="modal-actions">
-        <button class="btn btn-success" onclick="Reports.saveEditTransaction('${t.type}', ${t.type === 'session' ? t.session.id : t.order.id})">ذخیره</button>
-        <button class="btn btn-danger" onclick="Reports.deleteTransaction('${t.type}', ${t.type === 'session' ? t.session.id : t.order.id})">حذف</button>
+        <button class="btn btn-success" onclick="Reports.saveEditTransaction('${t.type}', ${t.id})">ذخیره</button>
+        <button class="btn btn-danger" onclick="Reports.deleteTransaction('${t.type}', ${t.id})">حذف</button>
         <button class="btn btn-outline" onclick="App.closeModalForce()">انصراف</button>
       </div>
     `);
@@ -508,6 +508,24 @@ const Reports = (function () {
         session.settlePayType = newPayType;
         await DB.put("sessions", session);
       }
+    } else if (type === "blockPayment") {
+      let bp = await DB.get("blockPayments", id);
+      if (bp) {
+        let oldAmount = bp.amount || 0;
+        let oldPayType = bp.payType || "cash";
+        if (bp.customerId && (oldAmount !== newAmount || oldPayType !== newPayType)) {
+          await reversePayment(bp.customerId, oldAmount, oldPayType);
+          let payResult = await Utils.applyPayment(bp.customerId, newAmount, newPayType);
+          if (!payResult.success) {
+            await Utils.applyPayment(bp.customerId, oldAmount, oldPayType);
+            App.toast(payResult.reason === "insufficient_wallet" ? "موجودی کیف‌پول کافی نیست" : "پرداخت ناموفق بود");
+            return;
+          }
+        }
+        bp.amount = newAmount;
+        bp.payType = newPayType;
+        await DB.put("blockPayments", bp);
+      }
     } else {
       let order = await DB.get("cafeOrders", id);
       if (order) {
@@ -544,6 +562,25 @@ const Reports = (function () {
         session.status = "deleted";
         session.settledAt = null;
         await DB.put("sessions", session);
+      }
+    } else if (type === "blockPayment") {
+      let bp = await DB.get("blockPayments", id);
+      if (bp) {
+        if (bp.customerId) {
+          await reversePayment(bp.customerId, bp.amount || 0, bp.payType || "cash");
+        }
+        if (bp.deviceType === "tournament" && bp.matchId) {
+          let match = await DB.get("matches", bp.matchId);
+          if (match) {
+            match.settled = false;
+            match.settlePayType = null;
+            match.settleAmount = null;
+            match.settlerName = null;
+            match.settledAt = null;
+            await DB.put("matches", match);
+          }
+        }
+        await DB.remove("blockPayments", id);
       }
     } else {
       let order = await DB.get("cafeOrders", id);
