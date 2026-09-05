@@ -10,6 +10,7 @@ const Inventory = (function () {
         ${items.length === 0 ? '<div class="empty-state">هنوز آیتمی تعریف نشده</div>' : ''}
         ${items.map((item) => `
           <div class="list-row">
+            ${item.image ? `<img class="item-thumb" src="${item.image}" alt="${Utils.escapeHtml(item.name)}">` : `<span class="item-thumb item-thumb-placeholder">☕</span>`}
             <span class="row-value" style="font-weight:500">${Utils.escapeHtml(item.name)}</span>
             <span class="row-value">${Utils.formatCurrency(item.price)}</span>
             <span class="row-value ${item.unlimited ? '' : (item.stock <= 5 ? 'amount negative' : '')}">${item.unlimited ? 'موجودی: نامحدود' : 'موجودی: ' + item.stock}</span>

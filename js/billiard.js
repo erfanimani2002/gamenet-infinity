@@ -3,6 +3,7 @@ const Billiard = (function () {
     let devices = await DB.getAll("devices");
     let tables = devices.filter((d) => d.type === "billiard");
     let sessions = await DB.getAll("sessions");
+    let customers = await DB.getAll("customers");
     let pricing = await DB.getSetting("pricing", {});
     let rates = pricing.billiardRates || { 2: 8000, 4: 12000 };
 
@@ -12,7 +13,7 @@ const Billiard = (function () {
         <div class="device-list">
           ${tables.map((d) => {
             let session = sessions.find((s) => s.deviceId === d.id && s.status === "active");
-            return renderDeviceRow(d, session, rates);
+            return renderDeviceRow(d, session, rates, customers);
           }).join("")}
         </div>
       </div>
@@ -28,14 +29,14 @@ const Billiard = (function () {
     });
   }
 
-  function renderDeviceRow(device, session, rates) {
+  function renderDeviceRow(device, session, rates, customers) {
     let statusClass = device.status === "free" ? "status-free" : "status-busy";
-    let statusText = device.status === "free" ? "آزاد" : "در حال استفاده";
+    let statusText = device.status === "tournament" ? "در حال مسابقه" : device.status === "free" ? "آزاد" : "در حال استفاده";
 
     if (session) {
       let lastBlock = session.timeBlocks && session.timeBlocks[session.timeBlocks.length - 1];
       let timerHtml = lastBlock && !lastBlock.endTime ? `<span class="inline-timer" id="timer-billiard-${device.id}">00:00:00</span>` : "";
-      let idsHtml = (session.ids || []).map((id) => "#" + id).join(", ") || "?";
+      let idsHtml = (session.ids || []).map((id) => { let c = customers.find((cu) => cu.id === id); return "#" + (c ? (c.displayId || c.id) : id); }).join(", ") || "?";
       let stickText = session.controllerCount === 4 ? "چهارچوب" : "دوچوب";
 
       return `
@@ -62,13 +63,18 @@ const Billiard = (function () {
         </div>`;
     }
 
+    let isFreeForSession = device.status === "free" || !device.status;
+
     return `
       <div class="device-item">
         <img class="device-thumb" src="img/pool.webp" alt="بیلیارد">
         <span class="device-name">${Utils.escapeHtml(device.name)}</span>
         <span class="device-status"><span class="status-badge ${statusClass}">${statusText}</span></span>
         <div class="device-actions">
-          <button class="btn btn-sm btn-success" onclick="Billiard.startSession(${device.id})">شروع سشن</button>
+          ${isFreeForSession
+            ? `<button class="btn btn-sm btn-success" onclick="Billiard.startSession(${device.id})">شروع سشن</button>`
+            : `<button class="btn btn-sm btn-outline" disabled>در حال مسابقه</button>`
+          }
         </div>
       </div>`;
   }
@@ -135,6 +141,11 @@ const Billiard = (function () {
 
   async function confirmStartSession(deviceId) {
     if (selectedIds.length === 0) { App.toast("حداقل یک شناسه"); return; }
+    let device = await DB.get("devices", deviceId);
+    if (device && device.status && device.status !== "free") {
+      App.toast("این دستگاه در حال استفاده در یک مسابقه است");
+      return;
+    }
     let stickCount = parseInt(document.getElementById("bStickCount").value);
     let pricing = await DB.getSetting("pricing", {});
     let rate = (pricing.billiardRates || {})[stickCount] || 8000;
@@ -153,6 +164,12 @@ const Billiard = (function () {
     let sessions = await DB.getAll("sessions");
     let session = sessions.find((s) => s.deviceId === deviceId && s.status === "active");
     if (!session) return;
+
+    if (session.timeBlocks.length > 0 && session.timeBlocks[session.timeBlocks.length - 1].endTime === null) {
+      App.toast("یک بلوک باز از قبل وجود دارد");
+      return;
+    }
+
     let pricing = await DB.getSetting("pricing", {});
     let rate = (pricing.billiardRates || {})[session.controllerCount] || 8000;
     session.timeBlocks.push({ startTime: new Date().toISOString(), endTime: null, rate, controllerCount: session.controllerCount, price: 0 });
@@ -186,10 +203,7 @@ const Billiard = (function () {
     if (unsettledBlocks.length === 0) { App.toast("بلوک تسویه‌نشده‌ای وجود ندارد"); return; }
 
     let customers = await DB.getAll("customers");
-    let customerOptions = (session.ids || []).map((id) => {
-      let c = customers.find((cu) => cu.id === id);
-      return `<option value="${id}">#${c ? (c.displayId || c.id) : id}</option>`;
-    }).join("");
+    let defaultPayerId = (session.ids || [])[0];
     let settlerHtml = await Utils.renderSettlerSelect();
 
     App.openModal(`
@@ -204,7 +218,7 @@ const Billiard = (function () {
             </div>
             <div class="text-muted text-sm mb-2">${dur}</div>
             <div class="form-inline">
-              <div class="form-group"><label>پرداخت‌کننده</label><select id="bPayer_${b.index}">${customerOptions}</select></div>
+              <div class="form-group"><label>پرداخت‌کننده</label>${Utils.renderPayerSelect(customers, defaultPayerId, "bPayer_" + b.index)}</div>
               <div class="form-group"><label>روش</label><select id="bPayType_${b.index}"><option value="wallet">کیف‌پول</option><option value="debt">بدهکاری</option><option value="cash">نقدی</option><option value="card">کارتی</option></select></div>
               <div class="form-group"><label>تسویه‌کننده</label>${settlerHtml.replace('id="settlerSelect"', 'id="bSettler_' + b.index + '"')}</div>
               <button class="btn btn-sm btn-success" onclick="Billiard.settleSingleBlock(${deviceId}, ${b.index})">تسویه این بلوک</button>
@@ -283,7 +297,7 @@ const Billiard = (function () {
     }
 
     let customers = await DB.getAll("customers");
-    let customerOptions = (session.ids || []).map((id) => { let c = customers.find((cu) => cu.id === id); return `<option value="${id}">#${c ? (c.displayId || c.id) : id}</option>`; }).join("");
+    let defaultPayerId = (session.ids || [])[0];
     let settlerHtml = await Utils.renderSettlerSelect();
 
     App.openModal(`
@@ -292,7 +306,7 @@ const Billiard = (function () {
       <div class="list-row"><span class="row-label">آیتم</span><span class="row-value">${Utils.formatCurrency(totalItems)}</span></div>
       ${discount > 0 ? `<div class="list-row"><span class="row-label">تخفیف</span><span class="row-value amount positive">-${Utils.formatCurrency(discount)}</span></div>` : ''}
       <div class="list-row font-bold text-lg"><span class="row-label">کل</span><span class="row-value amount">${Utils.formatCurrency(total - discount)}</span></div>
-      <div class="form-group"><label>پرداخت‌کننده</label><select id="payerId">${customerOptions}</select></div>
+      <div class="form-group"><label>پرداخت‌کننده</label>${Utils.renderPayerSelect(customers, defaultPayerId, "payerId")}</div>
       <div class="form-group"><label>روش پرداخت</label><select id="settlePayType"><option value="wallet">کیف‌پول</option><option value="debt">بدهکاری</option><option value="cash">نقدی</option><option value="card">کارتی</option></select></div>
       <div class="form-group"><label>تسویه‌کننده</label>${settlerHtml}</div>
       <div class="modal-actions">
@@ -417,9 +431,12 @@ const Billiard = (function () {
     }
     let targetDevice = await DB.get("devices", targetId);
     let pricing = await DB.getSetting("pricing", {});
-    let newRate = targetDevice.type === "billiard" ? (pricing.billiardRates || {})[session.controllerCount] || 8000 : (pricing.consoleRates || {})[session.controllerCount] || 5000;
-    session.deviceId = targetId; session.deviceType = targetDevice.type;
-    session.timeBlocks.push({ startTime: new Date().toISOString(), endTime: null, rate: newRate, controllerCount: session.controllerCount, price: 0 });
+    // Look up the rate fresh for the destination device type instead of
+    // reusing the source device's controllerCount, which has no meaning on
+    // the destination type (see Utils.resolveTransferRate).
+    let { rate: newRate, controllerCount: newControllerCount } = Utils.resolveTransferRate(pricing, targetDevice.type, session.controllerCount);
+    session.deviceId = targetId; session.deviceType = targetDevice.type; session.controllerCount = newControllerCount;
+    session.timeBlocks.push({ startTime: new Date().toISOString(), endTime: null, rate: newRate, controllerCount: newControllerCount, price: 0 });
     let oldDevice = await DB.get("devices", deviceId);
     await DB.put("sessions", session);
     await DB.put("devices", { ...oldDevice, status: "free" });

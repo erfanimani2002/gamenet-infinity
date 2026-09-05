@@ -601,8 +601,14 @@ const Reports = (function () {
     let sessions = await DB.getAll("sessions");
     let cafeOrders = await DB.getAll("cafeOrders");
     let blockPayments = await DB.getAll("blockPayments");
+    let walletCharges = await DB.getAll("walletCharges");
+    let cafeItems = await DB.getAll("cafeItems");
+    let dailySummaries = await DB.getAll("dailySummaries");
+    let tournaments = await DB.getAll("tournaments");
+    let matches = await DB.getAll("matches");
     let customers = await DB.getAll("customers");
     let devices = await DB.getAll("devices");
+
     let data = [];
     sessions.filter((s) => s.status === "settled" && s.settledAt && Utils.isInRange(s.settledAt, range.start, range.end)).forEach((s) => {
       let device = devices.find((d) => d.id === s.deviceId);
@@ -611,16 +617,90 @@ const Reports = (function () {
     });
     cafeOrders.filter((o) => Utils.isInRange(o.createdAt, range.start, range.end)).forEach((o) => {
       let c = customers.find((cu) => cu.id === o.customerId);
-      data.push({ "نوع": "کافی‌شاپ", "دستگاه": "-", "شناسه‌ها": c ? "#" + (c.displayId || c.id) : "", "مبلغ": o.total, "روش": o.payType, "تاریخ": Jalali.formatDateTime(o.createdAt), "تسویه‌کننده": "" });
+      let itemsText = (o.items || []).map((i) => i.name + " x" + i.qty).join("، ");
+      data.push({ "نوع": "کافی‌شاپ", "دستگاه": "-", "شناسه‌ها": c ? "#" + (c.displayId || c.id) : "", "آیتم‌ها": itemsText, "مبلغ": o.total, "روش": o.payType, "تاریخ": Jalali.formatDateTime(o.createdAt), "تسویه‌کننده": "" });
     });
     blockPayments.filter((bp) => Utils.isInRange(bp.date, range.start, range.end)).forEach((bp) => {
       let device = devices.find((d) => d.id === bp.deviceId);
       let c = customers.find((cu) => cu.id === bp.customerId);
-      data.push({ "نوع": "تسویه بلوک", "دستگاه": device ? device.name : "", "شناسه‌ها": c ? "#" + (c.displayId || c.id) : "", "مبلغ": bp.amount, "روش": bp.payType, "تاریخ": Jalali.formatDateTime(bp.date), "تسویه‌کننده": bp.settlerName || "" });
+      data.push({ "نوع": bp.deviceType === "tournament" ? "تسویه بازی مسابقه" : "تسویه بلوک", "دستگاه": device ? device.name : "", "شناسه‌ها": c ? "#" + (c.displayId || c.id) : "", "مبلغ": bp.amount, "روش": bp.payType, "تاریخ": Jalali.formatDateTime(bp.date), "تسویه‌کننده": bp.settlerName || "" });
     });
     let ws = XLSX.utils.json_to_sheet(data);
     let wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "گزارش روزانه");
+
+    // Café orders with full item breakdown and pay type.
+    let dailyOrders = cafeOrders.filter((o) => Utils.isInRange(o.createdAt, range.start, range.end));
+    if (dailyOrders.length) {
+      let wsOrders = XLSX.utils.json_to_sheet(dailyOrders.map((o) => {
+        let c = customers.find((cu) => cu.id === o.customerId);
+        return {
+          "شناسه": c ? "#" + (c.displayId || c.id) : "",
+          "آیتم‌ها": (o.items || []).map((i) => i.name + " x" + i.qty).join("، "),
+          "جمع": o.total,
+          "روش پرداخت": o.payType,
+          "تاریخ": Jalali.formatDateTime(o.createdAt),
+        };
+      }));
+      XLSX.utils.book_append_sheet(wb, wsOrders, "سفارشات کافی‌شاپ");
+    }
+
+    // Wallet charge history within the day.
+    let dailyCharges = walletCharges.filter((c) => Utils.isInRange(c.date, range.start, range.end));
+    if (dailyCharges.length) {
+      let wsCharges = XLSX.utils.json_to_sheet(dailyCharges.map((ch) => {
+        let c = customers.find((cu) => cu.id === ch.customerId);
+        return {
+          "شناسه": c ? "#" + (c.displayId || c.id) : "",
+          "مبلغ": ch.amount,
+          "روش": ch.paymentType === "cash" ? "نقدی" : "کارتی",
+          "تاریخ": Jalali.formatDateTime(ch.date),
+        };
+      }));
+      XLSX.utils.book_append_sheet(wb, wsCharges, "شارژ کیف‌پول");
+    }
+
+    // Current cafe item inventory levels.
+    if (cafeItems.length) {
+      let wsInventory = XLSX.utils.json_to_sheet(cafeItems.map((it) => ({
+        "نام": it.name,
+        "قیمت": it.price,
+        "موجودی": it.unlimited ? "نامحدود" : it.stock,
+      })));
+      XLSX.utils.book_append_sheet(wb, wsInventory, "موجودی کافی‌شاپ");
+    }
+
+    // Day-close summary (all recorded days, not just today).
+    if (dailySummaries.length) {
+      let wsSummary = XLSX.utils.json_to_sheet(dailySummaries.map((s) => ({
+        "تاریخ": s.date,
+        "نقدی ورودی": s.cashIn,
+        "کارتی ورودی": s.cardIn,
+        "نقدی خروجی": s.cashOut,
+        "کارتی خروجی": s.cardOut,
+        "زمان بستن": s.closedAt ? Jalali.formatDateTime(s.closedAt) : "",
+      })));
+      XLSX.utils.book_append_sheet(wb, wsSummary, "بستن روز");
+    }
+
+    // Tournament match settlements (blockPayments with deviceType "tournament").
+    let tournamentSettlements = blockPayments.filter((bp) => bp.deviceType === "tournament" && Utils.isInRange(bp.date, range.start, range.end));
+    if (tournamentSettlements.length) {
+      let wsTournament = XLSX.utils.json_to_sheet(tournamentSettlements.map((bp) => {
+        let c = customers.find((cu) => cu.id === bp.customerId);
+        let t = tournaments.find((tt) => tt.matches && tt.matches.includes(bp.matchId));
+        return {
+          "مسابقه": t ? t.name : "",
+          "شناسه پرداخت‌کننده": c ? "#" + (c.displayId || c.id) : "",
+          "مبلغ": bp.amount,
+          "روش": bp.payType,
+          "تاریخ": Jalali.formatDateTime(bp.date),
+          "تسویه‌کننده": bp.settlerName || "",
+        };
+      }));
+      XLSX.utils.book_append_sheet(wb, wsTournament, "تسویه مسابقات");
+    }
+
     XLSX.writeFile(wb, "گزارش_روزانه_" + Jalali.formatDate(new Date()).replace(/\//g, "-") + ".xlsx");
     App.toast("اکسل دانلود شد");
   }
@@ -634,19 +714,65 @@ const Reports = (function () {
     let sessions = await DB.getAll("sessions");
     let cafeOrders = await DB.getAll("cafeOrders");
     let blockPayments = await DB.getAll("blockPayments");
+    let walletCharges = await DB.getAll("walletCharges");
+    let cafeItems = await DB.getAll("cafeItems");
+    let dailySummaries = await DB.getAll("dailySummaries");
+    let tournaments = await DB.getAll("tournaments");
+    let customers = await DB.getAll("customers");
+    let devices = await DB.getAll("devices");
+
     let data = [];
     sessions.filter((s) => s.status === "settled" && s.settledAt && Utils.isInRange(s.settledAt, firstDay, lastDay)).forEach((s) => {
-      data.push({ "نوع": s.deviceType, "مبلغ": s.settleAmount, "روش": s.settlePayType, "تاریخ": Jalali.formatDateTime(s.settledAt) });
+      let device = devices.find((d) => d.id === s.deviceId);
+      let ids = (s.ids || []).map((id) => { let c = customers.find((cu) => cu.id === id); return "#" + (c ? (c.displayId || c.id) : id); }).join(", ");
+      data.push({ "نوع": s.deviceType, "دستگاه": device ? device.name : "", "شناسه‌ها": ids, "مبلغ": s.settleAmount, "روش": s.settlePayType, "تاریخ": Jalali.formatDateTime(s.settledAt) });
     });
     cafeOrders.filter((o) => Utils.isInRange(o.createdAt, firstDay, lastDay)).forEach((o) => {
-      data.push({ "نوع": "کافی‌شاپ", "مبلغ": o.total, "روش": o.payType, "تاریخ": Jalali.formatDateTime(o.createdAt) });
+      let c = customers.find((cu) => cu.id === o.customerId);
+      data.push({ "نوع": "کافی‌شاپ", "شناسه": c ? "#" + (c.displayId || c.id) : "", "آیتم‌ها": (o.items || []).map((i) => i.name + " x" + i.qty).join("، "), "مبلغ": o.total, "روش": o.payType, "تاریخ": Jalali.formatDateTime(o.createdAt) });
     });
     blockPayments.filter((bp) => Utils.isInRange(bp.date, firstDay, lastDay)).forEach((bp) => {
-      data.push({ "نوع": "تسویه بلوک", "مبلغ": bp.amount, "روش": bp.payType, "تاریخ": Jalali.formatDateTime(bp.date) });
+      let c = customers.find((cu) => cu.id === bp.customerId);
+      data.push({ "نوع": bp.deviceType === "tournament" ? "تسویه بازی مسابقه" : "تسویه بلوک", "شناسه": c ? "#" + (c.displayId || c.id) : "", "مبلغ": bp.amount, "روش": bp.payType, "تاریخ": Jalali.formatDateTime(bp.date) });
     });
     let ws = XLSX.utils.json_to_sheet(data);
     let wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "ماهانه");
+
+    // Wallet charge history within the month.
+    let monthCharges = walletCharges.filter((c) => Utils.isInRange(c.date, firstDay, lastDay));
+    if (monthCharges.length) {
+      let wsCharges = XLSX.utils.json_to_sheet(monthCharges.map((ch) => {
+        let c = customers.find((cu) => cu.id === ch.customerId);
+        return { "شناسه": c ? "#" + (c.displayId || c.id) : "", "مبلغ": ch.amount, "روش": ch.paymentType === "cash" ? "نقدی" : "کارتی", "تاریخ": Jalali.formatDateTime(ch.date) };
+      }));
+      XLSX.utils.book_append_sheet(wb, wsCharges, "شارژ کیف‌پول");
+    }
+
+    // Current cafe item inventory levels.
+    if (cafeItems.length) {
+      let wsInventory = XLSX.utils.json_to_sheet(cafeItems.map((it) => ({ "نام": it.name, "قیمت": it.price, "موجودی": it.unlimited ? "نامحدود" : it.stock })));
+      XLSX.utils.book_append_sheet(wb, wsInventory, "موجودی کافی‌شاپ");
+    }
+
+    // Day-close summary records within the month.
+    let monthSummaries = dailySummaries.filter((s) => s.date && s.date.startsWith(year + "/" + String(month).padStart(2, "0")));
+    if (monthSummaries.length) {
+      let wsSummary = XLSX.utils.json_to_sheet(monthSummaries.map((s) => ({ "تاریخ": s.date, "نقدی ورودی": s.cashIn, "کارتی ورودی": s.cardIn, "نقدی خروجی": s.cashOut, "کارتی خروجی": s.cardOut })));
+      XLSX.utils.book_append_sheet(wb, wsSummary, "بستن روز");
+    }
+
+    // Tournament match settlements within the month.
+    let monthTournament = blockPayments.filter((bp) => bp.deviceType === "tournament" && Utils.isInRange(bp.date, firstDay, lastDay));
+    if (monthTournament.length) {
+      let wsTournament = XLSX.utils.json_to_sheet(monthTournament.map((bp) => {
+        let c = customers.find((cu) => cu.id === bp.customerId);
+        let t = tournaments.find((tt) => tt.matches && tt.matches.includes(bp.matchId));
+        return { "مسابقه": t ? t.name : "", "شناسه": c ? "#" + (c.displayId || c.id) : "", "مبلغ": bp.amount, "روش": bp.payType, "تاریخ": Jalali.formatDateTime(bp.date) };
+      }));
+      XLSX.utils.book_append_sheet(wb, wsTournament, "تسویه مسابقات");
+    }
+
     XLSX.writeFile(wb, "گزارش_ماهانه_" + year + "-" + month + ".xlsx");
     App.toast("اکسل دانلود شد");
   }

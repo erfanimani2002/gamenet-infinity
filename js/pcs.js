@@ -3,6 +3,7 @@ const PCs = (function () {
     let devices = await DB.getAll("devices");
     let pcs = devices.filter((d) => d.type === "pc");
     let sessions = await DB.getAll("sessions");
+    let customers = await DB.getAll("customers");
 
     let html = `
       <div class="card">
@@ -12,7 +13,7 @@ const PCs = (function () {
         <div class="device-list">
           ${pcs.map((d) => {
             let session = sessions.find((s) => s.deviceId === d.id && s.status === "active");
-            return renderPCRow(d, session);
+            return renderPCRow(d, session, customers);
           }).join("")}
         </div>
       </div>
@@ -20,9 +21,9 @@ const PCs = (function () {
     el.innerHTML = html;
   }
 
-  function renderPCRow(device, session) {
+  function renderPCRow(device, session, customers) {
     if (session) {
-      let idsHtml = (session.ids || []).map((id) => "#" + id).join(", ") || "?";
+      let idsHtml = (session.ids || []).map((id) => { let c = customers.find((cu) => cu.id === id); return "#" + (c ? (c.displayId || c.id) : id); }).join(", ") || "?";
       return `
         <div class="device-item" style="background: #fff7ed;">
           <img class="device-thumb" src="img/pc-on.webp" alt="پی‌سی">
@@ -36,6 +37,24 @@ const PCs = (function () {
             <button class="btn btn-sm btn-warning" onclick="PCs.turnOff(${device.id})">خاموش + تسویه</button>
             <button class="btn btn-sm btn-outline" onclick="PCs.showAddItem(${device.id})">+ آیتم</button>
             <button class="btn btn-sm btn-danger" onclick="PCs.cancelSession(${device.id})">لغو سشن</button>
+          </div>
+        </div>
+      `;
+    }
+
+    // A pc can be tied up by a tournament match (device.status === "tournament")
+    // with no session record — in that case it can't be turned on for a
+    // normal session until the match's timer ends.
+    if (device.status === "tournament") {
+      return `
+        <div class="device-item">
+          <img class="device-thumb" src="img/pc-on.webp" alt="پی‌سی">
+          <span class="device-name">${Utils.escapeHtml(device.name)}</span>
+          <span class="device-status">
+            <span class="status-badge status-busy">در حال مسابقه</span>
+          </span>
+          <div class="device-actions">
+            <button class="btn btn-sm btn-outline" disabled>در حال مسابقه</button>
           </div>
         </div>
       `;
@@ -121,6 +140,11 @@ const PCs = (function () {
 
   async function confirmTurnOn(deviceId) {
     if (selectedIds.length === 0) { App.toast("شناسه را انتخاب کنید"); return; }
+    let device = await DB.get("devices", deviceId);
+    if (device && device.status && device.status !== "free") {
+      App.toast("این دستگاه در حال استفاده در یک مسابقه است");
+      return;
+    }
 
     let session = {
       deviceId, deviceType: "pc", ids: [...selectedIds], controllerCount: 1,
@@ -144,10 +168,7 @@ const PCs = (function () {
 
     let totalItems = (session.items || []).reduce((s, i) => s + (i.price * i.qty), 0);
     let customers = await DB.getAll("customers");
-    let customerOptions = (session.ids || []).map((id) => {
-      let c = customers.find((cu) => cu.id === id);
-      return `<option value="${id}">#${c ? (c.displayId || c.id) : id}</option>`;
-    }).join("");
+    let defaultPayerId = (session.ids || [])[0];
     let settlerHtml = await Utils.renderSettlerSelect();
 
     App.openModal(`
@@ -155,7 +176,7 @@ const PCs = (function () {
       <div class="list-row"><span class="row-label">هزینه آیتم‌ها</span><span class="row-value">${Utils.formatCurrency(totalItems)}</span></div>
       <hr class="section-divider">
       <div class="form-group"><label>مبلغ بازی (تومان) - دستی وارد شود</label><input type="number" id="pcGameAmount" placeholder="مبلغ" min="0" value="0"></div>
-      <div class="form-group"><label>پرداخت‌کننده</label><select id="payerId">${customerOptions}</select></div>
+      <div class="form-group"><label>پرداخت‌کننده</label>${Utils.renderPayerSelect(customers, defaultPayerId, "payerId")}</div>
       <div class="form-group"><label>روش پرداخت</label>
         <select id="settlePayType"><option value="cash">نقدی</option><option value="card">کارتی</option><option value="wallet">کیف‌پول</option><option value="debt">بدهکاری</option></select>
       </div>

@@ -172,16 +172,20 @@ const DB = (function () {
 
   async function importAll(data) {
     await open();
-    let storeNames = Object.keys(STORES).filter((n) => data[n]);
-    if (storeNames.length === 0) return;
+    // Clear EVERY store, not just the ones present in the backup file, so a
+    // store that's missing from an older backup (e.g. blockPayments or
+    // prizePayouts, introduced after the backup was taken) ends up empty rather
+    // than leaving stale pre-restore rows mixed in with the restored data. Only
+    // stores actually present in the file get repopulated afterward.
+    let allStoreNames = Object.keys(STORES);
     return new Promise((resolve, reject) => {
-      let tx = db.transaction(storeNames, "readwrite");
+      let tx = db.transaction(allStoreNames, "readwrite");
       tx.oncomplete = () => resolve();
       tx.onerror = () => reject(tx.error);
-      storeNames.forEach((name) => {
+      allStoreNames.forEach((name) => {
         let store = tx.objectStore(name);
         store.clear();
-        let items = data[name] || [];
+        let items = data && data[name] || [];
         items.forEach((item) => { store.add(item); });
       });
     });

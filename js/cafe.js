@@ -14,6 +14,7 @@ const Cafe = (function () {
         <div class="item-grid">
           ${items.map((item) => `
             <div class="item-card" onclick="Cafe.addToCart(${item.id})">
+              ${item.image ? `<img class="item-img" src="${item.image}" alt="${Utils.escapeHtml(item.name)}">` : `<div class="item-img item-img-placeholder">☕</div>`}
               <div class="item-name">${Utils.escapeHtml(item.name)}</div>
               <div class="item-price">${Utils.formatCurrency(item.price)}</div>
               <div class="item-stock">${item.unlimited ? 'موجودی: نامحدود' : 'موجودی: ' + item.stock}</div>
@@ -96,7 +97,7 @@ const Cafe = (function () {
         <input type="text" id="cafeSearch" placeholder="جستجو..." oninput="Cafe.filterCustomers()">
         <div style="max-height:150px;overflow-y:auto;margin-top:8px;">
           ${customers.map((c) => `
-            <div class="list-row customer-pick" data-name="${(c.firstName+' '+c.lastName).toLowerCase()}" onclick="Cafe.pickCustomer(${c.id})" style="cursor:pointer">
+            <div class="list-row customer-pick" data-search="${String(c.displayId || c.id)}" onclick="Cafe.pickCustomer(${c.id})" style="cursor:pointer">
               <span class="row-label">#${c.displayId || c.id}</span>
             </div>
           `).join("")}
@@ -131,7 +132,7 @@ const Cafe = (function () {
   function filterCustomers() {
     let q = document.getElementById("cafeSearch").value.toLowerCase();
     document.querySelectorAll(".customer-pick").forEach((row) => {
-      row.style.display = row.dataset.name.includes(q) ? "flex" : "none";
+      row.style.display = (row.dataset.search || "").includes(q) ? "flex" : "none";
     });
   }
 

@@ -3,6 +3,7 @@ const Consoles = (function () {
     let devices = await DB.getAll("devices");
     let consoles = devices.filter((d) => d.type === "console");
     let sessions = await DB.getAll("sessions");
+    let customers = await DB.getAll("customers");
     let pricing = await DB.getSetting("pricing", {});
     let rates = pricing.consoleRates || { 1: 5000, 2: 7000, 3: 9000, 4: 11000 };
 
@@ -14,7 +15,7 @@ const Consoles = (function () {
         <div class="device-list" id="consoleList">
           ${consoles.map((d) => {
             let session = sessions.find((s) => s.deviceId === d.id && s.status === "active");
-            return renderDeviceRow(d, session, rates, pricing);
+            return renderDeviceRow(d, session, rates, pricing, customers);
           }).join("")}
         </div>
       </div>
@@ -30,9 +31,9 @@ const Consoles = (function () {
     });
   }
 
-  function renderDeviceRow(device, session, rates, pricing) {
+  function renderDeviceRow(device, session, rates, pricing, customers) {
     let statusClass = device.status === "free" ? "status-free" : "status-busy";
-    let statusText = device.status === "free" ? "آزاد" : "در حال استفاده";
+    let statusText = device.status === "tournament" ? "در حال مسابقه" : device.status === "free" ? "آزاد" : "در حال استفاده";
 
     if (session) {
       let blocks = session.timeBlocks || [];
@@ -41,7 +42,7 @@ const Consoles = (function () {
       if (lastBlock && !lastBlock.endTime) {
         timerHtml = `<span class="inline-timer" id="timer-${device.id}">00:00:00</span>`;
       }
-      let idsHtml = (session.ids || []).map((id) => "#" + id).join(", ") || "?";
+      let idsHtml = (session.ids || []).map((id) => { let c = customers.find((cu) => cu.id === id); return "#" + (c ? (c.displayId || c.id) : id); }).join(", ") || "?";
 
       return `
         <div class="device-item" style="background: #fff7ed;">
@@ -68,6 +69,11 @@ const Consoles = (function () {
       `;
     }
 
+    // A device can be "busy" with no session record here if it's currently
+    // tied up by a tournament match (device.status === "tournament") — in
+    // that case there's nothing to start a normal session on top of.
+    let isFreeForSession = device.status === "free" || !device.status;
+
     return `
       <div class="device-item">
         <img class="device-thumb" src="img/ps5-on.webp" alt="کنسول">
@@ -76,7 +82,10 @@ const Consoles = (function () {
           <span class="status-badge ${statusClass}">${statusText}</span>
         </span>
         <div class="device-actions">
-          <button class="btn btn-sm btn-success" onclick="Consoles.startSession(${device.id})">شروع سشن</button>
+          ${isFreeForSession
+            ? `<button class="btn btn-sm btn-success" onclick="Consoles.startSession(${device.id})">شروع سشن</button>`
+            : `<button class="btn btn-sm btn-outline" disabled>در حال مسابقه</button>`
+          }
         </div>
       </div>
     `;
@@ -189,6 +198,11 @@ const Consoles = (function () {
 
   async function confirmStartSession(deviceId) {
     if (selectedIds.length === 0) { App.toast("حداقل یک شناسه انتخاب کنید"); return; }
+    let device = await DB.get("devices", deviceId);
+    if (device && device.status && device.status !== "free") {
+      App.toast("این دستگاه در حال استفاده در یک مسابقه است");
+      return;
+    }
     let controllerCount = parseInt(document.getElementById("sControllerCount").value);
     let pricing = await DB.getSetting("pricing", {});
     let rates = pricing.consoleRates || { 1: 5000, 2: 7000, 3: 9000, 4: 11000 };
@@ -220,6 +234,12 @@ const Consoles = (function () {
     let sessions = await DB.getAll("sessions");
     let session = sessions.find((s) => s.deviceId === deviceId && s.status === "active");
     if (!session) return;
+
+    if (session.timeBlocks.length > 0 && session.timeBlocks[session.timeBlocks.length - 1].endTime === null) {
+      App.toast("یک بلوک باز از قبل وجود دارد");
+      return;
+    }
+
     let pricing = await DB.getSetting("pricing", {});
     let rates = pricing.consoleRates || {};
     let rate = rates[session.controllerCount] || rates[1];
@@ -257,10 +277,7 @@ const Consoles = (function () {
     if (unsettledBlocks.length === 0) { App.toast("بلوک تسویه‌نشده‌ای وجود ندارد"); return; }
 
     let customers = await DB.getAll("customers");
-    let customerOptions = (session.ids || []).map((id) => {
-      let c = customers.find((cu) => cu.id === id);
-      return `<option value="${id}">#${c ? (c.displayId || c.id) : id}</option>`;
-    }).join("");
+    let defaultPayerId = (session.ids || [])[0];
     let settlerHtml = await Utils.renderSettlerSelect();
 
     App.openModal(`
@@ -275,7 +292,7 @@ const Consoles = (function () {
             </div>
             <div class="text-muted text-sm mb-2">${dur}</div>
             <div class="form-inline">
-              <div class="form-group"><label>پرداخت‌کننده</label><select id="payer_${b.index}">${customerOptions}</select></div>
+              <div class="form-group"><label>پرداخت‌کننده</label>${Utils.renderPayerSelect(customers, defaultPayerId, "payer_" + b.index)}</div>
               <div class="form-group"><label>روش</label><select id="payType_${b.index}"><option value="wallet">کیف‌پول</option><option value="debt">بدهکاری</option><option value="cash">نقدی</option><option value="card">کارتی</option></select></div>
               <div class="form-group"><label>تسویه‌کننده</label>${settlerHtml.replace('id="settlerSelect"', 'id="settler_' + b.index + '"')}</div>
               <button class="btn btn-sm btn-success" onclick="Consoles.settleSingleBlock(${deviceId}, ${b.index})">تسویه این بلوک</button>
@@ -359,10 +376,7 @@ const Consoles = (function () {
     }
 
     let customers = await DB.getAll("customers");
-    let customerOptions = (session.ids || []).map((id) => {
-      let c = customers.find((cu) => cu.id === id);
-      return `<option value="${id}">#${c ? (c.displayId || c.id) : id}</option>`;
-    }).join("");
+    let defaultPayerId = (session.ids || [])[0];
     let settlerHtml = await Utils.renderSettlerSelect();
 
     App.openModal(`
@@ -372,7 +386,7 @@ const Consoles = (function () {
       ${discount > 0 ? `<div class="list-row"><span class="row-label">تخفیف</span><span class="row-value amount positive">-${Utils.formatCurrency(discount)}</span></div>` : ''}
       <div class="list-row font-bold text-lg"><span class="row-label">جمع کل</span><span class="row-value amount">${Utils.formatCurrency(total - discount)}</span></div>
       <hr class="section-divider">
-      <div class="form-group"><label>پرداخت‌کننده</label><select id="payerId">${customerOptions}</select></div>
+      <div class="form-group"><label>پرداخت‌کننده</label>${Utils.renderPayerSelect(customers, defaultPayerId, "payerId")}</div>
       <div class="form-group"><label>روش پرداخت</label>
         <select id="settlePayType"><option value="wallet">کیف‌پول</option><option value="debt">بدهکاری</option><option value="cash">نقدی</option><option value="card">کارتی</option></select>
       </div>
@@ -546,13 +560,16 @@ const Consoles = (function () {
 
     let targetDevice = await DB.get("devices", targetId);
     let pricing = await DB.getSetting("pricing", {});
-    let newRate = targetDevice.type === "billiard" ?
-      (pricing.billiardRates || {})[session.controllerCount] || 8000 :
-      (pricing.consoleRates || {})[session.controllerCount] || 5000;
+    // The destination device type has its own pricing/count semantics (e.g. a
+    // billiard table's rate is keyed by cue count, not the console's
+    // controller count) — look up the rate fresh for the destination type
+    // instead of reusing the source device's controllerCount value.
+    let { rate: newRate, controllerCount: newControllerCount } = Utils.resolveTransferRate(pricing, targetDevice.type, session.controllerCount);
 
     session.deviceId = targetId;
     session.deviceType = targetDevice.type;
-    session.timeBlocks.push({ startTime: new Date().toISOString(), endTime: null, rate: newRate, controllerCount: session.controllerCount, price: 0 });
+    session.controllerCount = newControllerCount;
+    session.timeBlocks.push({ startTime: new Date().toISOString(), endTime: null, rate: newRate, controllerCount: newControllerCount, price: 0 });
 
     let oldDevice = await DB.get("devices", deviceId);
     await DB.put("sessions", session);

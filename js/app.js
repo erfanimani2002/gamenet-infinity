@@ -123,6 +123,41 @@ const App = (function () {
 
     renderSidebar();
     switchTab("consoles");
+
+    startDayCloseReminder();
+  }
+
+  // ── Business-day close reminder (23:35 boundary) ─────────────────────────
+  // The business day ends at 23:35 (see Utils.getReportRange). This lightweight
+  // in-app reminder nudges staff a few minutes before, and again exactly at,
+  // the boundary so closing the register doesn't rely on staff memory. It fires
+  // at most once per marker per day (no browser push notifications needed).
+  let dayCloseReminderState = { day: null, fired: {} };
+  const DAY_CLOSE_MARKERS = [
+    { h: 23, m: 25, msg: "۱۰ دقیقه تا پایان روز کاری (۲۳:۳۵) — لطفاً برای بستن صندوق آماده شوید." },
+    { h: 23, m: 30, msg: "۵ دقیقه تا پایان روز کاری (۲۳:۳۵) — صندوق را شمارش کنید." },
+    { h: 23, m: 35, msg: "ساعت ۲۳:۳۵ است — روز را ببندید و صندوق را تسویه کنید." },
+  ];
+
+  function startDayCloseReminder() {
+    function tick() {
+      let now = new Date();
+      let dayKey = now.toDateString();
+      if (dayCloseReminderState.day !== dayKey) {
+        dayCloseReminderState = { day: dayKey, fired: {} };
+      }
+      let hh = now.getHours();
+      let mm = now.getMinutes();
+      DAY_CLOSE_MARKERS.forEach((marker) => {
+        let key = marker.h + ":" + marker.m;
+        if (hh === marker.h && mm === marker.m && !dayCloseReminderState.fired[key]) {
+          dayCloseReminderState.fired[key] = true;
+          toast(marker.msg);
+        }
+      });
+    }
+    tick();
+    setInterval(tick, 30000);
   }
 
   async function doLogout() {

@@ -137,6 +137,24 @@ const Customers = (function () {
     let payments = await DB.getByIndex("debtPayments", "by_customer", id);
     let charges = await DB.getByIndex("walletCharges", "by_customer", id);
 
+    // Past settled sessions this customer attended (listed in `ids`) or paid
+    // for (settlePayerId), most-recent first, capped to keep the modal tidy.
+    let sessions = await DB.getAll("sessions");
+    let devices = await DB.getAll("devices");
+    let history = sessions
+      .filter((s) => s.status === "settled" && ((s.ids || []).includes(id) || s.settlePayerId === id))
+      .sort((a, b) => new Date(b.settledAt) - new Date(a.settledAt))
+      .slice(0, 20);
+    let historyHtml = history.map((s) => {
+      let device = devices.find((d) => d.id === s.deviceId);
+      let typeName = s.deviceType === "console" ? "کنسول" : s.deviceType === "billiard" ? "بیلیارد" : s.deviceType === "pc" ? "پی‌سی" : s.deviceType;
+      let payTypeName = s.settlePayType === "wallet" ? "کیف‌پول" : s.settlePayType === "debt" ? "بدهکاری" : s.settlePayType === "cash" ? "نقدی" : "کارتی";
+      return `<div class="block-item">
+        <span>${typeName}${device ? " — " + Utils.escapeHtml(device.name) : ""}: ${Utils.formatCurrency(s.settleAmount || 0)} (${payTypeName})</span>
+        <span class="text-muted text-sm">${s.settledAt ? Jalali.formatDateTime(s.settledAt) : "-"}</span>
+      </div>`;
+    }).join("");
+
     App.openModal(`
       <h2>پروفایل شناسه #${c.displayId || c.id}</h2>
       <div class="list-row">
@@ -171,6 +189,9 @@ const Customers = (function () {
         <span class="row-label">مجموع پرداختی</span>
         <span class="row-value">${Utils.formatCurrency(c.totalPaid || 0)}</span>
       </div>
+      <hr class="section-divider">
+      <h3>تاریخچه سشن‌ها</h3>
+      ${historyHtml || '<div class="text-muted text-sm">بدون سشن گذشته</div>'}
       <hr class="section-divider">
       <h3>پرداخت‌ها و شارژها</h3>
       ${payments.length === 0 && charges.length === 0 ? '<div class="text-muted text-sm">بدون تراکنش</div>' : ''}

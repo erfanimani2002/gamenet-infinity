@@ -292,10 +292,7 @@ const Tournaments = (function () {
     let gameInfo = GAME_TYPES[t.gameType];
     let st = STATUS[t.status];
 
-    let participantHtml = participants.map((pid) => {
-      let c = customers.find((cu) => cu.id === pid);
-      return c ? ((c.firstName || '') + ' ' + (c.lastName || '')).trim() : '#' + pid;
-    }).join(", ");
+    let participantHtml = participants.map((pid) => getParticipantName(pid, customers)).join(", ");
 
     let matchesHtml = t.bracketType === "league"
       ? renderLeagueBracket(matches, t, customers)
@@ -315,8 +312,7 @@ const Tournaments = (function () {
         <h3 style="margin-bottom:8px;">شرکت‌کنندگان (${participants.length}/${t.participantCount})</h3>
         <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px;">
           ${participants.map((pid, i) => {
-            let c = customers.find((cu) => cu.id === pid);
-            let label = c ? ((c.firstName || '') + ' ' + (c.lastName || '')).trim() : '#' + pid;
+            let label = getParticipantName(pid, customers);
             return `<span class="status-badge status-free" style="cursor:pointer;" onclick="Tournaments.removeParticipant(${id}, ${pid})">${Utils.escapeHtml(label)} ✕</span>`;
           }).join("")}
         </div>
@@ -324,7 +320,7 @@ const Tournaments = (function () {
           <select id="addParticipantSelect" style="width:100%;">
             <option value="">انتخاب شناسه...</option>
             ${customers.filter((c) => !participants.includes(c.id)).map((c) => `
-              <option value="${c.id}">#${c.displayId || c.id} — ${Utils.escapeHtml(c.firstName || '')} ${Utils.escapeHtml(c.lastName || '')}</option>
+              <option value="${c.id}">#${c.displayId || c.id}</option>
             `).join("")}
           </select>
         </div>
@@ -482,16 +478,20 @@ const Tournaments = (function () {
     return `دور ${round}`;
   }
 
+  // Tournament UI must only ever show a participant's ID number, never their
+  // real name — full names stay visible only inside the customer's own
+  // profile view (Customers.showProfile), matching the same protection used
+  // elsewhere in the app (debts.js, reports.js).
   function getParticipantName(id, customers) {
     if (Array.isArray(id)) {
       return id.map((pid) => {
         let c = customers.find((cu) => cu.id === pid);
-        return c ? ((c.firstName || '') + ' ' + (c.lastName || '')).trim() : '?';
+        return c ? '#' + (c.displayId || c.id) : '?';
       }).join(" & ");
     }
     let c = customers.find((cu) => cu.id === id);
-    if (c) return ((c.firstName || '') + ' ' + (c.lastName || '')).trim();
-    return id ? 'ناشناس' : 'تعریف نشده';
+    if (c) return '#' + (c.displayId || c.id);
+    return id ? '#' + id : 'تعریف نشده';
   }
 
   async function addParticipant(tournamentId) {
@@ -526,10 +526,25 @@ const Tournaments = (function () {
     if (participants.length < 2) { App.toast("حداقل ۲ شرکت‌کننده لازم است"); return; }
 
     let matches = generateBracket(t, participants);
+    let savedMatches = [];
     for (let m of matches) {
-      let saved = await DB.add("matches", m);
+      // DB.add() resolves with the generated key itself (a number), not the
+      // stored object — assign it back onto `m` before using it as an id
+      // (the previous `saved.id` here was always undefined).
+      let savedId = await DB.add("matches", m);
+      m.id = savedId;
       t.matches = t.matches || [];
-      t.matches.push(saved.id);
+      t.matches.push(savedId);
+      savedMatches.push(m);
+    }
+
+    // Bye slots are created already "completed" with a winner but haven't
+    // gone through advanceWinner() yet — do that now (after every match has
+    // a real id) so the bye recipient is pushed into their round-2 match
+    // immediately, instead of the bracket showing an empty round-2 slot
+    // until someone manually intervenes.
+    for (let m of savedMatches) {
+      if (m.isBye) await advanceWinner(m);
     }
 
     t.status = "in_progress";
@@ -548,13 +563,64 @@ const Tournaments = (function () {
     return generateLeagueBracket(t, participants);
   }
 
+  // Single-elimination bracket sizing must be based on the next power of two
+  // at-or-above the participant count (not on `n` directly), because
+  // advanceWinner()'s progression math (nextMatchIndex = floor(matchIndex/2))
+  // assumes a perfect binary tree from round to round. With an `n`-based
+  // round size (the old behaviour) that assumption breaks for any non-
+  // power-of-2 participant count: later rounds end up with fewer incoming
+  // winners than slots, and matches get stuck waiting for a "player" that
+  // will never arrive. Sizing rounds off `bracketSize` fixes that structurally,
+  // and any leftover slots (`bracketSize - n`) become byes: a participant
+  // with no round-1 opponent who is automatically marked the winner of an
+  // already-"completed" round-1 slot, so bracket progression starts correctly
+  // without any manual assignment.
   function generateEliminationBracket(t, participants) {
     let n = participants.length;
-    let totalRounds = Math.ceil(Math.log2(n));
+    let bracketSize = 2;
+    while (bracketSize < n) bracketSize *= 2;
+    let totalRounds = Math.log2(bracketSize);
+    let byeCount = bracketSize - n;
+    let round1Count = bracketSize / 2;
     let matches = [];
 
-    for (let round = 1; round <= totalRounds; round++) {
-      let matchCount = Math.ceil(n / Math.pow(2, round));
+    // Participants are seeded into round 1 in their current list order (no
+    // random-seeding option exists elsewhere in the app to honor here).
+    // The first `byeCount` round-1 slots each get a single participant and
+    // an automatic bye; the remaining slots are normal 2-player matches.
+    let pIdx = 0;
+    for (let i = 0; i < round1Count; i++) {
+      let isByeMatch = i < byeCount;
+      let playerA = pIdx < n ? participants[pIdx++] : null;
+      let playerB = isByeMatch ? null : (pIdx < n ? participants[pIdx++] : null);
+      let isBye = isByeMatch && playerA != null;
+
+      matches.push({
+        tournamentId: t.id,
+        round: 1,
+        matchIndex: i,
+        playerA: playerA,
+        playerB: playerB,
+        scoreA: isBye ? 1 : null,
+        scoreB: isBye ? 0 : null,
+        winner: isBye ? playerA : null,
+        deviceId: null,
+        timerStart: null,
+        timerEnd: null,
+        deviceCost: 0,
+        items: [],
+        status: isBye ? "completed" : "pending",
+        settled: false,
+        settlePayType: null,
+        settleAmount: 0,
+        settlerName: "",
+        settledAt: null,
+        isBye: isBye,
+      });
+    }
+
+    for (let round = 2; round <= totalRounds; round++) {
+      let matchCount = bracketSize / Math.pow(2, round);
       for (let i = 0; i < matchCount; i++) {
         matches.push({
           tournamentId: t.id,
@@ -666,18 +732,22 @@ const Tournaments = (function () {
       : "شروع نشده";
 
     let matchDevices = devices.filter((d) => {
-      if (tournament.gameType === "football") return d.type === "console";
-      if (tournament.gameType === "billiard") return d.type === "billiard";
-      if (tournament.gameType === "cs2") return d.type === "pc";
-      return false;
+      let typeOk = tournament.gameType === "football" ? d.type === "console"
+        : tournament.gameType === "billiard" ? d.type === "billiard"
+        : tournament.gameType === "cs2" ? d.type === "pc"
+        : false;
+      if (!typeOk) return false;
+      // Devices already busy (normal session or another match) are hidden
+      // from the picker, except the device already assigned to *this* match
+      // so it stays selectable while its timer is running.
+      return d.status === "free" || d.id === match.deviceId;
     });
 
     let playerAssignmentHtml = "";
     if (!hasBothPlayers) {
       let alreadySelected = [match.playerA, match.playerB].filter(Boolean);
       let optionsHtml = availablePlayers.concat(alreadySelected).map((pid) => {
-        let c = customers.find((cu) => cu.id === pid);
-        let label = c ? '#' + (c.displayId || c.id) + ' — ' + ((c.firstName || '') + ' ' + (c.lastName || '')).trim() : '#' + pid;
+        let label = getParticipantName(pid, customers);
         return `<option value="${pid}">${Utils.escapeHtml(label)}</option>`;
       }).join("");
 
@@ -789,11 +859,27 @@ const Tournaments = (function () {
   async function startMatchTimer(matchId) {
     let match = await DB.get("matches", matchId);
     if (!match) return;
-    match.timerStart = new Date().toISOString();
-    match.status = "active";
 
     let deviceId = document.getElementById("matchDevice")?.value;
     if (deviceId) match.deviceId = parseInt(deviceId);
+
+    if (match.deviceId) {
+      // A tournament match's device must be marked busy the same way a
+      // normal session does, and vice versa a device already running a
+      // normal session (or a different match) must block this match from
+      // starting — otherwise the same physical console/table could be
+      // double-booked by a session and a match simultaneously.
+      let device = await DB.get("devices", match.deviceId);
+      if (!device) { App.toast("دستگاه یافت نشد"); return; }
+      if (device.status && device.status !== "free") {
+        App.toast("این دستگاه در حال استفاده است");
+        return;
+      }
+      await DB.put("devices", { ...device, status: "tournament" });
+    }
+
+    match.timerStart = new Date().toISOString();
+    match.status = "active";
 
     await DB.put("matches", match);
     openMatch(matchId);
@@ -818,6 +904,14 @@ const Tournaments = (function () {
       }
       let durationHours = (new Date(match.timerEnd) - new Date(match.timerStart)) / 3600000;
       match.deviceCost = Math.round(rate * durationHours);
+
+      // Free the device now that the match's timer has been settled/stopped,
+      // the same way session-end frees a device — otherwise it would stay
+      // stuck as busy forever after the match finishes.
+      let device = await DB.get("devices", match.deviceId);
+      if (device && device.status === "tournament") {
+        await DB.put("devices", { ...device, status: "free" });
+      }
     }
 
     await DB.put("matches", match);
@@ -943,15 +1037,7 @@ const Tournaments = (function () {
     if (!t) return;
     if (!t.entryFee || t.entryFee <= 0) { App.toast("حق ورود تعریف نشده"); return; }
     let customers = await DB.getAll("customers");
-    let c = customers.find((cu) => cu.id === participantId);
-    let name = c ? ((c.firstName || '') + ' ' + (c.lastName || '')).trim() : '#' + participantId;
-    let participants = t.participants || [];
-
-    let customerOptions = participants.map((pid) => {
-      let cu = customers.find((x) => x.id === pid);
-      let label = cu ? ((cu.firstName || '') + ' ' + (cu.lastName || '')).trim() : '#' + pid;
-      return `<option value="${pid}" ${pid === participantId ? 'selected' : ''}>${Utils.escapeHtml(label)}</option>`;
-    }).join("");
+    let name = getParticipantName(participantId, customers);
     let settlerHtml = await Utils.renderSettlerSelect();
 
     App.openModal(`
@@ -959,7 +1045,7 @@ const Tournaments = (function () {
       <div class="list-row"><span class="row-label">شرکت‌کننده</span><span class="row-value">${Utils.escapeHtml(name)}</span></div>
       <div class="list-row font-bold"><span class="row-label">مبلغ</span><span class="row-value amount">${Utils.formatCurrency(t.entryFee)}</span></div>
       <hr class="section-divider">
-      <div class="form-group"><label>پرداخت‌کننده</label><select id="entryPayerId">${customerOptions}</select></div>
+      <div class="form-group"><label>پرداخت‌کننده</label>${Utils.renderPayerSelect(customers, participantId, "entryPayerId")}</div>
       <div class="form-group"><label>روش پرداخت</label>
         <select id="entryPayType"><option value="wallet">کیف‌پول</option><option value="debt">بدهکاری</option><option value="cash">نقدی</option><option value="card">کارتی</option></select>
       </div>
@@ -1006,14 +1092,7 @@ const Tournaments = (function () {
 
     if (total <= 0) { App.toast("هزینه‌ای برای تسویه وجود ندارد"); return; }
 
-    let loserId = match.winner ? (match.winner === match.playerA ? match.playerB : match.playerA) : null;
-    let matchPlayers = [match.playerA, match.playerB].filter(Boolean);
-
-    let customerOptions = matchPlayers.map((pid) => {
-      let c = customers.find((cu) => cu.id === pid);
-      let label = c ? ((c.firstName || '') + ' ' + (c.lastName || '')).trim() : '#' + pid;
-      return `<option value="${pid}" ${pid === loserId ? 'selected' : ''}>${Utils.escapeHtml(label)}</option>`;
-    }).join("");
+    let loserId = match.winner ? (match.winner === match.playerA ? match.playerB : match.playerA) : (match.playerA || match.playerB);
 
     let settlerHtml = await Utils.renderSettlerSelect();
 
@@ -1024,7 +1103,7 @@ const Tournaments = (function () {
       <div class="list-row"><span class="row-label">آیتم‌ها</span><span class="row-value">${Utils.formatCurrency(totalItems)}</span></div>
       <div class="list-row font-bold text-lg"><span class="row-label">جمع کل</span><span class="row-value amount">${Utils.formatCurrency(total)}</span></div>
       <hr class="section-divider">
-      <div class="form-group"><label>پرداخت‌کننده</label><select id="matchPayerId">${customerOptions}</select></div>
+      <div class="form-group"><label>پرداخت‌کننده</label>${Utils.renderPayerSelect(customers, loserId, "matchPayerId")}</div>
       <div class="form-group"><label>روش پرداخت</label>
         <select id="matchPayType"><option value="wallet">کیف‌پول</option><option value="debt">بدهکاری</option><option value="cash">نقدی</option><option value="card">کارتی</option></select>
       </div>
@@ -1148,8 +1227,7 @@ const Tournaments = (function () {
     let participants = t.participants || [];
     let customers = await DB.getAll("customers");
     let customerOptions = participants.map((pid) => {
-      let c = customers.find((cu) => cu.id === pid);
-      let label = c ? ((c.firstName || '') + ' ' + (c.lastName || '')).trim() : '#' + pid;
+      let label = getParticipantName(pid, customers);
       return `<option value="${pid}">${Utils.escapeHtml(label)}</option>`;
     }).join("");
 
@@ -1210,8 +1288,7 @@ const Tournaments = (function () {
     let entryFeeStatus = tournament.entryFeeStatus || {};
 
     let entryFeeHtml = participants.map((pid) => {
-      let c = customers.find((cu) => cu.id === pid);
-      let name = c ? ((c.firstName || '') + ' ' + (c.lastName || '')).trim() : '#' + pid;
+      let name = getParticipantName(pid, customers);
       let status = entryFeeStatus[pid];
       let collected = status && status.collected;
       return `<div class="list-row" style="align-items:center;">
@@ -1365,8 +1442,7 @@ const Tournaments = (function () {
 
     let rows = sorted.map((pid, i) => {
       let s = stats[pid];
-      let c = customers.find((cu) => cu.id === pid);
-      let name = c ? ((c.firstName || '') + ' ' + (c.lastName || '')).trim() : '#' + pid;
+      let name = getParticipantName(pid, customers);
       return `<tr>
         <td>${i + 1}</td>
         <td>${Utils.escapeHtml(name)}</td>

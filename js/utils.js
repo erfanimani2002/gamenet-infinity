@@ -191,6 +191,53 @@ const Utils = (function () {
     return c ? "#" + (c.displayId || c.id) : "#" + id;
   }
 
+  // Given a destination device type and a controller/cue count carried over
+  // from the device a session is being transferred *from*, resolves the rate
+  // + a valid count for the destination. The incoming count may have no
+  // meaning on the destination type (e.g. a console session's controllerCount
+  // of 1 carried onto a billiard table, where valid cue counts are 2/4) — in
+  // that case we fall back to a sensible default count for the destination
+  // type instead of silently defaulting the *price* while keeping a
+  // nonsensical count on the block.
+  function resolveTransferRate(pricing, deviceType, controllerCount) {
+    let rates = deviceType === "billiard" ? (pricing.billiardRates || {}) : (pricing.consoleRates || {});
+    let defaultCount = deviceType === "billiard" ? 2 : 1;
+    let fallbackRate = deviceType === "billiard" ? 8000 : 5000;
+    let count = rates[controllerCount] != null ? controllerCount : defaultCount;
+    let rate = rates[count] != null ? rates[count] : fallbackRate;
+    return { rate, controllerCount: count };
+  }
+
+  // Renders a payer picker that lists ALL customers (not just those already
+  // attached to the session/order being settled), with a search input to
+  // filter by ID — following the same search-then-pick pattern used elsewhere
+  // (e.g. Consoles.filterCustomers) but built on a plain <select> so existing
+  // `document.getElementById(selectId).value` reads keep working unchanged.
+  // `defaultId` (usually the session's first customer) is preselected for
+  // convenience but any customer can still be chosen.
+  function renderPayerSelect(customers, defaultId, selectId) {
+    let selected = defaultId != null && customers.some((c) => c.id === defaultId)
+      ? defaultId
+      : (customers[0] && customers[0].id);
+    let options = customers.map((c) => {
+      let idLabel = String(c.displayId || c.id);
+      return `<option value="${c.id}" ${c.id === selected ? 'selected' : ''} data-search="${idLabel}">#${idLabel}</option>`;
+    }).join("");
+    return `
+      <input type="text" placeholder="جستجوی شناسه..." style="width:100%;margin-bottom:4px;padding:6px 8px;border:1px solid var(--border);border-radius:var(--radius-sm);font-size:12px;box-sizing:border-box;" oninput="Utils.filterPayerSelect(this)">
+      <select id="${selectId}">${options}</select>
+    `;
+  }
+
+  function filterPayerSelect(input) {
+    let q = input.value.toLowerCase();
+    let select = input.nextElementSibling;
+    if (!select) return;
+    Array.from(select.options).forEach((opt) => {
+      opt.hidden = !(opt.dataset.search || "").toLowerCase().includes(q);
+    });
+  }
+
   const jalaliWeekdays = ["شنبه", "یکشنبه", "دوشنبه", "سه‌شنبه", "چهارشنبه", "پنجشنبه", "جمعه"];
   function getJalaliWeekday(date) {
     let d = date instanceof Date ? date : new Date(date);
@@ -204,6 +251,6 @@ const Utils = (function () {
     calculateSessionDuration, formatDuration, formatTimerDisplay,
     isInRange, escapeHtml, renderSelectLabel,
     applyPayment, computePaymentUpdate, guardDoubleClick, getSettlerOptions, renderSettlerSelect, getSettlerName, getCustomerDisplayId,
-    getJalaliWeekday,
+    getJalaliWeekday, resolveTransferRate, renderPayerSelect, filterPayerSelect,
   };
 })();
