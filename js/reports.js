@@ -20,33 +20,47 @@ const Reports = (function () {
     let dailyCharges = walletCharges.filter((c) => Utils.isInRange(c.date, range.start, range.end));
     let dailyPurchases = purchases.filter((p) => Utils.isInRange(p.date, range.start, range.end));
 
+    // `cash`/`card` are the only fields that feed totalCashIn/totalCardIn (the
+    // till reconciliation). `wallet`/`debt` are tracked alongside purely for the
+    // "فروش / عملیات" breakdown so managers can see revenue that didn't move
+    // through the till (already-collected wallet balance or a new receivable) —
+    // they must NEVER be added into totalCashIn/totalCardIn below.
     let calcSection = (sessionsList) => {
-      let cash = 0, card = 0;
+      let cash = 0, card = 0, wallet = 0, debt = 0;
       sessionsList.forEach((s) => {
         let amt = s.settleAmount || 0;
         if (s.settlePayType === "cash") cash += amt;
         else if (s.settlePayType === "card") card += amt;
+        else if (s.settlePayType === "wallet") wallet += amt;
+        else if (s.settlePayType === "debt") debt += amt;
       });
-      return { cash, card, total: cash + card };
+      return { cash, card, wallet, debt, total: cash + card + wallet + debt };
     };
 
     let consoleCalc = calcSection(settledSessions.filter((s) => s.deviceType === "console"));
     let billiardCalc = calcSection(settledSessions.filter((s) => s.deviceType === "billiard"));
     let pcCalc = calcSection(settledSessions.filter((s) => s.deviceType === "pc"));
 
-    let consoleBlock = { cash: 0, card: 0 };
-    let billiardBlock = { cash: 0, card: 0 };
-    let tournamentMatchBlock = { cash: 0, card: 0 };
+    let consoleBlock = { cash: 0, card: 0, wallet: 0, debt: 0 };
+    let billiardBlock = { cash: 0, card: 0, wallet: 0, debt: 0 };
+    let tournamentMatchBlock = { cash: 0, card: 0, wallet: 0, debt: 0 };
     let dailyBlockPayments = blockPayments.filter((bp) => Utils.isInRange(bp.date, range.start, range.end));
     dailyBlockPayments.forEach((bp) => {
       let amt = bp.amount || 0;
       let target = bp.deviceType === "console" ? consoleBlock : bp.deviceType === "tournament" ? tournamentMatchBlock : billiardBlock;
       if (bp.payType === "cash") target.cash += amt;
       else if (bp.payType === "card") target.card += amt;
+      else if (bp.payType === "wallet") target.wallet += amt;
+      else if (bp.payType === "debt") target.debt += amt;
     });
 
-    let cafeCash = 0, cafeCard = 0;
-    dailyOrders.forEach((o) => { if (o.payType === "cash") cafeCash += o.total; else if (o.payType === "card") cafeCard += o.total; });
+    let cafeCash = 0, cafeCard = 0, cafeWallet = 0, cafeDebt = 0;
+    dailyOrders.forEach((o) => {
+      if (o.payType === "cash") cafeCash += o.total;
+      else if (o.payType === "card") cafeCard += o.total;
+      else if (o.payType === "wallet") cafeWallet += o.total;
+      else if (o.payType === "debt") cafeDebt += o.total;
+    });
 
     let debtCash = 0, debtCard = 0;
     dailyDebtPayments.forEach((p) => { if (p.paymentType === "cash") debtCash += p.amount; else debtCard += p.amount; });
@@ -68,18 +82,22 @@ const Reports = (function () {
     });
 
     let activeMatches = matchData.filter((m) => m.status === "completed" && m.timerEnd && Utils.isInRange(m.timerEnd, range.start, range.end));
-    let tournamentCash = 0, tournamentCard = 0;
+    let tournamentCash = 0, tournamentCard = 0, tournamentWallet = 0, tournamentDebt = 0;
     tournaments.forEach((t) => {
       if (!t.entryFeeStatus) return;
       Object.values(t.entryFeeStatus).forEach((efs) => {
         if (efs.collected && efs.settledAt && Utils.isInRange(efs.settledAt, range.start, range.end)) {
           if (efs.payType === "cash") tournamentCash += t.entryFee || 0;
           else if (efs.payType === "card") tournamentCard += t.entryFee || 0;
+          else if (efs.payType === "wallet") tournamentWallet += t.entryFee || 0;
+          else if (efs.payType === "debt") tournamentDebt += t.entryFee || 0;
         }
       });
     });
     tournamentCash += tournamentMatchBlock.cash;
     tournamentCard += tournamentMatchBlock.card;
+    tournamentWallet += tournamentMatchBlock.wallet;
+    tournamentDebt += tournamentMatchBlock.debt;
 
     // Prize payouts paid out as cash/card are cash-outs, the same way purchases
     // are. A payout credited to the winner's wallet doesn't leave the till, so
@@ -91,6 +109,9 @@ const Reports = (function () {
       else if (p.payType === "card") payoutCard += p.amount || 0;
     });
 
+    // Till reconciliation totals — unchanged: only cash/card legs count here.
+    // Wallet/debt legs (computed above per area) are reporting-only and never
+    // enter these sums, since no physical money moved through the till for them.
     let totalCashIn = consoleCalc.cash + consoleBlock.cash + billiardCalc.cash + billiardBlock.cash + pcCalc.cash + cafeCash + debtCash + chargeCash + tournamentCash;
     let totalCardIn = consoleCalc.card + consoleBlock.card + billiardCalc.card + billiardBlock.card + pcCalc.card + cafeCard + debtCard + chargeCard + tournamentCard;
     let totalCashOut = purchaseCash + payoutCash;
@@ -98,11 +119,31 @@ const Reports = (function () {
 
     return {
       consoleCalc, billiardCalc, pcCalc, consoleBlock, billiardBlock,
-      cafeCash, cafeCard, debtCash, debtCard, chargeCash, chargeCard,
+      cafeCash, cafeCard, cafeWallet, cafeDebt, debtCash, debtCard, chargeCash, chargeCard,
       purchaseCash, purchaseCard, purchaseOther, payoutCash, payoutCard,
-      tournamentCash, tournamentCard, activeMatches,
+      tournamentCash, tournamentCard, tournamentWallet, tournamentDebt, tournamentMatchBlock, activeMatches,
       totalCashIn, totalCardIn, totalCashOut, totalCardOut,
     };
+  }
+
+  // Renders one "فروش / عملیات" area row with all four payment-method columns.
+  // Returns "" (renders nothing) when the area had no activity at all, so the
+  // report doesn't list a wall of empty zero-rows for areas unused that day.
+  function renderAreaBreakdown(title, cash, card, wallet, debt, extra) {
+    let total = (cash || 0) + (card || 0) + (wallet || 0) + (debt || 0);
+    if (total <= 0 && !extra) return "";
+    return `
+      <div class="report-section">
+        <h4>${title}</h4>
+        <div class="report-summary">
+          <div class="summary-item"><div class="summary-label">نقدی</div><div class="summary-value">${Utils.formatCurrency(cash || 0)}</div></div>
+          <div class="summary-item"><div class="summary-label">کارتی</div><div class="summary-value">${Utils.formatCurrency(card || 0)}</div></div>
+          <div class="summary-item"><div class="summary-label">کیف‌پول</div><div class="summary-value">${Utils.formatCurrency(wallet || 0)}</div></div>
+          <div class="summary-item"><div class="summary-label">بدهکاری</div><div class="summary-value">${Utils.formatCurrency(debt || 0)}</div></div>
+          ${extra || ""}
+        </div>
+      </div>
+    `;
   }
 
   async function renderDaily(el) {
@@ -110,11 +151,23 @@ const Reports = (function () {
     let d = await calculateDailyTotals(range);
     let {
       consoleCalc, billiardCalc, pcCalc, consoleBlock, billiardBlock,
-      cafeCash, cafeCard, debtCash, debtCard, chargeCash, chargeCard,
+      cafeCash, cafeCard, cafeWallet, cafeDebt, debtCash, debtCard, chargeCash, chargeCard,
       purchaseCash, purchaseCard, purchaseOther, payoutCash, payoutCard,
-      tournamentCash, tournamentCard, activeMatches,
+      tournamentCash, tournamentCard, tournamentWallet, tournamentDebt, activeMatches,
       totalCashIn, totalCardIn, totalCashOut, totalCardOut,
     } = d;
+
+    let tournamentExtra = activeMatches.length > 0
+      ? `<div class="summary-item"><div class="summary-label">بازی‌های تکمیل‌شده</div><div class="summary-value">${activeMatches.length}</div></div>`
+      : "";
+
+    let areasHtml = [
+      renderAreaBreakdown("کنسول‌ها", consoleCalc.cash + consoleBlock.cash, consoleCalc.card + consoleBlock.card, consoleCalc.wallet + consoleBlock.wallet, consoleCalc.debt + consoleBlock.debt),
+      renderAreaBreakdown("بیلیارد", billiardCalc.cash + billiardBlock.cash, billiardCalc.card + billiardBlock.card, billiardCalc.wallet + billiardBlock.wallet, billiardCalc.debt + billiardBlock.debt),
+      renderAreaBreakdown("پی‌سی", pcCalc.cash, pcCalc.card, pcCalc.wallet, pcCalc.debt),
+      renderAreaBreakdown("کافی‌شاپ", cafeCash, cafeCard, cafeWallet, cafeDebt),
+      renderAreaBreakdown("مسابقات", tournamentCash, tournamentCard, tournamentWallet, tournamentDebt, tournamentExtra),
+    ].join("");
 
     let html = `
       <div class="card">
@@ -129,38 +182,13 @@ const Reports = (function () {
           <div class="summary-item"><div class="summary-label">کارتی دریافتی</div><div class="summary-value">${Utils.formatCurrency(totalCardIn)}</div></div>
         </div>
 
-        <h3>دریافتی‌ها</h3>
-
-        <div class="report-section">
-          <h4>کنسول‌ها</h4>
-          <div class="report-summary">
-            <div class="summary-item"><div class="summary-label">نقدی</div><div class="summary-value">${Utils.formatCurrency(consoleCalc.cash + consoleBlock.cash)}</div></div>
-            <div class="summary-item"><div class="summary-label">کارتی</div><div class="summary-value">${Utils.formatCurrency(consoleCalc.card + consoleBlock.card)}</div></div>
-          </div>
-        </div>
-
-        <div class="report-section">
-          <h4>بیلیارد</h4>
-          <div class="report-summary">
-            <div class="summary-item"><div class="summary-label">نقدی</div><div class="summary-value">${Utils.formatCurrency(billiardCalc.cash + billiardBlock.cash)}</div></div>
-            <div class="summary-item"><div class="summary-label">کارتی</div><div class="summary-value">${Utils.formatCurrency(billiardCalc.card + billiardBlock.card)}</div></div>
-          </div>
-        </div>
-
-        <div class="report-section">
-          <h4>پی‌سی</h4>
-          <div class="report-summary">
-            <div class="summary-item"><div class="summary-label">نقدی</div><div class="summary-value">${Utils.formatCurrency(pcCalc.cash)}</div></div>
-            <div class="summary-item"><div class="summary-label">کارتی</div><div class="summary-value">${Utils.formatCurrency(pcCalc.card)}</div></div>
-          </div>
-        </div>
-
-        <div class="report-section">
-          <h4>کافی‌شاپ</h4>
-          <div class="report-summary">
-            <div class="summary-item"><div class="summary-label">نقدی</div><div class="summary-value">${Utils.formatCurrency(cafeCash)}</div></div>
-            <div class="summary-item"><div class="summary-label">کارتی</div><div class="summary-value">${Utils.formatCurrency(cafeCard)}</div></div>
-          </div>
+        <hr class="section-divider">
+        <h3>صندوق</h3>
+        <div class="report-summary">
+          <div class="summary-item"><div class="summary-label">نقدی دریافتی</div><div class="summary-value">${Utils.formatCurrency(totalCashIn)}</div></div>
+          <div class="summary-item"><div class="summary-label">کارتی دریافتی</div><div class="summary-value">${Utils.formatCurrency(totalCardIn)}</div></div>
+          <div class="summary-item"><div class="summary-label">نقدی پرداختی</div><div class="summary-value amount negative">${Utils.formatCurrency(totalCashOut)}</div></div>
+          <div class="summary-item"><div class="summary-label">مانده نقدی</div><div class="summary-value font-bold">${Utils.formatCurrency(totalCashIn - totalCashOut)}</div></div>
         </div>
 
         <div class="report-section">
@@ -179,16 +207,19 @@ const Reports = (function () {
           </div>
         </div>
 
-        ${(tournamentCash + tournamentCard) > 0 ? `
-        <div class="report-section">
-          <h4>مسابقات</h4>
-          <div class="report-summary">
-            <div class="summary-item"><div class="summary-label">نقدی حق ورود</div><div class="summary-value">${Utils.formatCurrency(tournamentCash)}</div></div>
-            <div class="summary-item"><div class="summary-label">کارتی حق ورود</div><div class="summary-value">${Utils.formatCurrency(tournamentCard)}</div></div>
-            <div class="summary-item"><div class="summary-label">بازی‌های تکمیل‌شده</div><div class="summary-value">${activeMatches.length}</div></div>
-          </div>
+        <div class="form-inline">
+          <div class="form-group"><label>مبلغ شمارش‌شده صندوق</label><input type="number" id="cashCounted" placeholder="0" min="0"></div>
+          <div class="form-group"><label>مبلغ کارتخوان</label><input type="number" id="cardReceived" placeholder="0" min="0"></div>
         </div>
-        ` : ''}
+        <div class="text-muted text-sm" style="margin-top:4px">توجه: خریدهای پاسارگاد در جمع کارتخوان (POS) لحاظ نشده‌اند؛ کارتخوان فقط دریافتی‌های کارتی مشتریان است.</div>
+        <div id="reconciliationResult" style="margin-top:8px">
+          <div class="list-row"><span class="row-label">اختلاف نقدی</span><span class="row-value" id="diffCash">-</span></div>
+          <div class="list-row"><span class="row-label">اختلاف کارتخوان</span><span class="row-value" id="diffCard">-</span></div>
+        </div>
+
+        <hr class="section-divider">
+        <h3>فروش / عملیات</h3>
+        ${areasHtml || '<div class="text-muted text-sm">فروش/عملیاتی ثبت نشده</div>'}
 
         <hr class="section-divider">
         <h3>پرداختی‌ها (خریدها)</h3>
@@ -209,26 +240,10 @@ const Reports = (function () {
         ` : ''}
 
         <hr class="section-divider">
-        <h3>تطبیق صندوق</h3>
-        <div class="report-summary">
-          <div class="summary-item"><div class="summary-label">نقدی دریافتی</div><div class="summary-value">${Utils.formatCurrency(totalCashIn)}</div></div>
-          <div class="summary-item"><div class="summary-label">نقدی پرداختی (خرید + جایزه)</div><div class="summary-value amount negative">${Utils.formatCurrency(totalCashOut)}</div></div>
-          <div class="summary-item"><div class="summary-label">مانده نقدی</div><div class="summary-value font-bold">${Utils.formatCurrency(totalCashIn - totalCashOut)}</div></div>
-        </div>
-        <div class="form-inline">
-          <div class="form-group"><label>مبلغ شمارش‌شده صندوق</label><input type="number" id="cashCounted" placeholder="0" min="0"></div>
-          <div class="form-group"><label>مبلغ کارتخوان</label><input type="number" id="cardReceived" placeholder="0" min="0"></div>
-        </div>
-        <div id="reconciliationResult" style="margin-top:8px">
-          <div class="list-row"><span class="row-label">اختلاف نقدی</span><span class="row-value" id="diffCash">-</span></div>
-          <div class="list-row"><span class="row-label">اختلاف کارتخوان</span><span class="row-value" id="diffCard">-</span></div>
-        </div>
-
-        <hr class="section-divider">
         <div class="flex-gap">
           <button class="btn btn-primary" onclick="Reports.exportDailyExcel()">خروجی اکسل</button>
           <button class="btn btn-outline" onclick="Reports.showFullTransactions()">لیست تراکنش‌ها</button>
-          <button class="btn btn-success" onclick="Reports.closeDay(${totalCashIn}, ${totalCardIn}, ${totalCashOut}, ${totalCardOut})">بستن روز</button>
+          <button class="btn btn-success" onclick="Reports.closeDay()">بستن روز</button>
         </div>
       </div>
     `;
@@ -249,41 +264,14 @@ const Reports = (function () {
     if (dcd) { dcd.textContent = Utils.formatCurrency(diffCard); dcd.className = "row-value " + (diffCard !== 0 ? "amount negative" : "amount positive"); }
   }
 
+  // The instant report is just the daily report's same business-day window,
+  // ending "now" instead of at 23:35 — so it MUST share calculateDailyTotals
+  // with renderDaily instead of re-deriving totals, or the two can silently
+  // drift apart (e.g. missing purchases/payouts, as they previously did here).
   async function renderInstant(el) {
     let range = Utils.getCurrentReportRange();
-    let sessions = await DB.getAll("sessions");
-    let cafeOrders = await DB.getAll("cafeOrders");
-    let debtPayments = await DB.getAll("debtPayments");
-    let blockPayments = await DB.getAll("blockPayments");
-
-    let tournaments = await DB.getAll("tournaments");
-    let matches = await DB.getAll("matches");
-    let activeMatches = matches.filter((m) => m.status === "completed" && m.timerEnd && Utils.isInRange(m.timerEnd, range.start, range.end));
-    let tournamentCash = 0, tournamentCard = 0;
-    tournaments.forEach((t) => {
-      if (!t.entryFeeStatus) return;
-      Object.values(t.entryFeeStatus).forEach((efs) => {
-        if (efs.collected && efs.settledAt && Utils.isInRange(efs.settledAt, range.start, range.end)) {
-          if (efs.payType === "cash") tournamentCash += t.entryFee || 0;
-          else if (efs.payType === "card") tournamentCard += t.entryFee || 0;
-        }
-      });
-    });
-
-    let walletCharges = await DB.getAll("walletCharges");
-    let dailyCharges = walletCharges.filter((c) => Utils.isInRange(c.date, range.start, range.end));
-    let chargeCash = 0, chargeCard = 0;
-    dailyCharges.forEach((c) => { if (c.paymentType === "cash") chargeCash += c.amount; else chargeCard += c.amount; });
-
-    let allTransactions = [
-      ...sessions.filter((s) => s.status === "settled" && s.settledAt && Utils.isInRange(s.settledAt, range.start, range.end)).map((s) => ({ payType: s.settlePayType, amount: s.settleAmount || 0 })),
-      ...cafeOrders.filter((o) => Utils.isInRange(o.createdAt, range.start, range.end)).map((o) => ({ payType: o.payType, amount: o.total })),
-      ...debtPayments.filter((p) => Utils.isInRange(p.date, range.start, range.end)).map((d) => ({ payType: d.paymentType, amount: d.amount })),
-      ...blockPayments.filter((bp) => Utils.isInRange(bp.date, range.start, range.end)).map((bp) => ({ payType: bp.payType, amount: bp.amount })),
-    ];
-
-    let totalCash = chargeCash + tournamentCash, totalCard = chargeCard + tournamentCard;
-    allTransactions.forEach((t) => { if (t.payType === "cash") totalCash += t.amount; else if (t.payType === "card") totalCard += t.amount; });
+    let d = await calculateDailyTotals(range);
+    let { totalCashIn, totalCardIn, totalCashOut, totalCardOut } = d;
 
     el.innerHTML = `
       <div class="card">
@@ -292,9 +280,14 @@ const Reports = (function () {
           <div class="text-muted text-sm">از ${Jalali.formatDateTime(range.start)} تا الان</div>
         </div>
         <div class="report-summary">
-          <div class="summary-item"><div class="summary-label">جمع کل</div><div class="summary-value">${Utils.formatCurrency(totalCash + totalCard)}</div></div>
-          <div class="summary-item"><div class="summary-label">نقدی</div><div class="summary-value">${Utils.formatCurrency(totalCash)}</div></div>
-          <div class="summary-item"><div class="summary-label">کارتی</div><div class="summary-value">${Utils.formatCurrency(totalCard)}</div></div>
+          <div class="summary-item"><div class="summary-label">جمع کل دریافتی</div><div class="summary-value">${Utils.formatCurrency(totalCashIn + totalCardIn)}</div></div>
+          <div class="summary-item"><div class="summary-label">نقدی دریافتی</div><div class="summary-value">${Utils.formatCurrency(totalCashIn)}</div></div>
+          <div class="summary-item"><div class="summary-label">کارتی دریافتی</div><div class="summary-value">${Utils.formatCurrency(totalCardIn)}</div></div>
+        </div>
+        <div class="report-summary">
+          <div class="summary-item"><div class="summary-label">نقدی پرداختی</div><div class="summary-value amount negative">${Utils.formatCurrency(totalCashOut)}</div></div>
+          <div class="summary-item"><div class="summary-label">کارتی پرداختی</div><div class="summary-value amount negative">${Utils.formatCurrency(totalCardOut)}</div></div>
+          <div class="summary-item"><div class="summary-label">مانده نقدی</div><div class="summary-value font-bold">${Utils.formatCurrency(totalCashIn - totalCashOut)}</div></div>
         </div>
         <button class="btn btn-primary" onclick="Reports.renderInstant(document.getElementById('tab-instantReport'))">بازخوانی</button>
       </div>
@@ -338,8 +331,10 @@ const Reports = (function () {
       matches: await DB.getAll("matches"),
       prizePayouts: await DB.getAll("prizePayouts"),
     };
+    let dailySummaries = await DB.getAll("dailySummaries");
 
     let dayData = {};
+    let dayKeys = {};
     for (let d = 0; d < monthDays; d++) {
       // Business day boundaries are [calendarDay-1 23:35, calendarDay 23:35), the
       // same window Utils.getReportRange uses for "today" — computed here by
@@ -349,6 +344,9 @@ const Reports = (function () {
       let dayRange = Utils.getReportRange(noon);
       let totals = await calculateDailyTotals(dayRange, preloaded);
       dayData[d + 1] = totals.totalCashIn + totals.totalCardIn;
+      // The saved dailySummaries key (if this day was ever closed) is the
+      // business-day key of that same range — same derivation closeDay uses.
+      dayKeys[d + 1] = Utils.getBusinessDayKey(dayRange);
     }
 
     let monthTotal = Object.values(dayData).reduce((s, v) => s + v, 0);
@@ -373,25 +371,69 @@ const Reports = (function () {
           }).join("")}
         </div>
       </div>
-      <div class="report-section"><h3>فهرست روزبه‌رو</h3>
+      <div class="report-section"><h3>فهرست روزبه‌روز</h3>
         ${Object.entries(dayData).map(([day, total]) => {
           let dayDate = new Date(firstDay); dayDate.setDate(dayDate.getDate() + parseInt(day) - 1);
           let weekday = Utils.getJalaliWeekday(dayDate);
-          return `<div class="list-row"><span class="row-label">روز ${day} (${weekday})</span><span class="row-value">${Utils.formatCurrency(total)}</span></div>`;
+          let summary = dailySummaries.find((s) => s.date === dayKeys[day]);
+          // Drawer counts/diffs are only present once a day has actually been
+          // closed (closeDay persists cashCounted/cardReceived/diffCash/diffCard);
+          // older summaries saved before that field was added simply omit it.
+          let drawerHtml = summary && summary.cashCounted != null
+            ? `<span class="text-muted text-sm" style="margin-right:8px">شمارش: ${Utils.formatCurrency(summary.cashCounted)} | کارتخوان: ${Utils.formatCurrency(summary.cardReceived || 0)} | اختلاف نقدی: ${Utils.formatCurrency(summary.diffCash || 0)}</span>`
+            : "";
+          return `<div class="list-row"><span class="row-label">روز ${day} (${weekday})</span>${drawerHtml}<span class="row-value">${Utils.formatCurrency(total)}</span></div>`;
         }).join("")}
       </div>
       <button class="btn btn-primary" onclick="Reports.exportMonthlyExcel()">خروجی اکسل</button>
     `;
   }
 
-  async function closeDay(cashIn, cardIn, cashOut, cardOut) {
-    if (!confirm("آیا از بستن روز مطمئن هستید؟ اطلاعات در گزارش ماهانه ثبت خواهد شد.")) return;
-    let today = Jalali.getTodayJalali();
-    let key = today.year + "/" + String(today.month).padStart(2, "0") + "/" + String(today.day).padStart(2, "0");
-    let daySummary = { date: key, cashIn: cashIn, cardIn: cardIn, cashOut: cashOut, cardOut: cardOut, closedAt: new Date().toISOString() };
+  // Closes the business day currently shown by the daily report (renderDaily
+  // always uses Utils.getReportRange(), the [previous 23:35, this 23:35) window).
+  // The button carries no baked-in totals: it recomputes them here and reads
+  // #cashCounted/#cardReceived live, so a report left open across the 23:35
+  // boundary can't close using stale numbers or the wrong day key.
+  async function closeDay() {
+    let range = Utils.getReportRange();
+    let d = await calculateDailyTotals(range);
+    let { totalCashIn, totalCardIn, totalCashOut, totalCardOut } = d;
+
+    let cashCountedInput = document.getElementById("cashCounted");
+    let cardReceivedInput = document.getElementById("cardReceived");
+    let cashCountedRaw = cashCountedInput ? cashCountedInput.value.trim() : "";
+    let cardReceivedRaw = cardReceivedInput ? cardReceivedInput.value.trim() : "";
+    if (!cashCountedRaw && !cardReceivedRaw) {
+      App.toast("قبل از بستن روز، مبلغ شمارش‌شده صندوق یا کارتخوان را وارد کنید");
+      return;
+    }
+    let cashCounted = parseInt(cashCountedRaw) || 0;
+    let cardReceived = parseInt(cardReceivedRaw) || 0;
+    let netCash = totalCashIn - totalCashOut;
+    let diffCash = cashCounted - netCash;
+    let diffCard = cardReceived - totalCardIn;
+
+    // The business-day key is derived from the END of the report range (the
+    // 23:35 instant that closes it) — not from today's calendar date — so
+    // closing at 23:40 correctly files under the NEXT business day, which is
+    // already the day the on-screen report describes.
+    let key = Utils.getBusinessDayKey(range);
+
+    let existing = await DB.get("dailySummaries", key);
+    let confirmMsg = existing
+      ? "برای روز " + key + " قبلاً گزارش بستن ثبت شده. آیا از رونویسی آن مطمئن هستید؟"
+      : "آیا از بستن روز " + key + " مطمئن هستید؟ اطلاعات در گزارش ماهانه ثبت خواهد شد.";
+    if (!confirm(confirmMsg)) return;
+
+    let daySummary = {
+      date: key,
+      cashIn: totalCashIn, cardIn: totalCardIn, cashOut: totalCashOut, cardOut: totalCardOut,
+      cashCounted, cardReceived, diffCash, diffCard,
+      closedAt: new Date().toISOString(),
+    };
     await DB.put("dailySummaries", daySummary);
-    await DB.logActivity("بستن روز", "تاریخ: " + key + " | نقدی: " + Utils.formatCurrency(cashIn) + " | کارتی: " + Utils.formatCurrency(cardIn));
-    App.toast("روز بسته شد");
+    await DB.logActivity("بستن روز", "تاریخ: " + key + " | نقدی: " + Utils.formatCurrency(totalCashIn) + " | کارتی: " + Utils.formatCurrency(totalCardIn) + " | شمارش‌شده نقدی: " + Utils.formatCurrency(cashCounted) + " | کارتخوان: " + Utils.formatCurrency(cardReceived));
+    App.toast("روز " + key + " بسته شد");
   }
 
   async function showFullTransactions() {
@@ -710,7 +752,17 @@ const Reports = (function () {
     let year = parseInt(document.getElementById("monthlyYear")?.value);
     let firstDay = Jalali.getJalaliFirstDayOfMonth(year, month);
     let monthDays = Jalali.getJalaliMonthDays(year, month);
-    let lastDay = new Date(firstDay); lastDay.setDate(lastDay.getDate() + monthDays);
+
+    // Match the chart/list exactly: the month's export window is the UNION of
+    // each Jalali calendar day's business-day range (getReportRange(noon)),
+    // i.e. [day-1's 23:35, last day's 23:35) — NOT calendar midnight. Using
+    // calendar midnight here would lose or shift a transaction that happens
+    // between 23:35 and midnight on the first/last day of the month relative
+    // to what the chart/list already show for those same days.
+    let monthStart = Utils.getReportRange(new Date(firstDay.getFullYear(), firstDay.getMonth(), firstDay.getDate(), 12, 0, 0)).start;
+    let lastCalendarDay = new Date(firstDay); lastCalendarDay.setDate(lastCalendarDay.getDate() + monthDays - 1);
+    let monthEnd = Utils.getReportRange(new Date(lastCalendarDay.getFullYear(), lastCalendarDay.getMonth(), lastCalendarDay.getDate(), 12, 0, 0)).end;
+
     let sessions = await DB.getAll("sessions");
     let cafeOrders = await DB.getAll("cafeOrders");
     let blockPayments = await DB.getAll("blockPayments");
@@ -722,16 +774,16 @@ const Reports = (function () {
     let devices = await DB.getAll("devices");
 
     let data = [];
-    sessions.filter((s) => s.status === "settled" && s.settledAt && Utils.isInRange(s.settledAt, firstDay, lastDay)).forEach((s) => {
+    sessions.filter((s) => s.status === "settled" && s.settledAt && Utils.isInRange(s.settledAt, monthStart, monthEnd)).forEach((s) => {
       let device = devices.find((d) => d.id === s.deviceId);
       let ids = (s.ids || []).map((id) => { let c = customers.find((cu) => cu.id === id); return "#" + (c ? (c.displayId || c.id) : id); }).join(", ");
       data.push({ "نوع": s.deviceType, "دستگاه": device ? device.name : "", "شناسه‌ها": ids, "مبلغ": s.settleAmount, "روش": s.settlePayType, "تاریخ": Jalali.formatDateTime(s.settledAt) });
     });
-    cafeOrders.filter((o) => Utils.isInRange(o.createdAt, firstDay, lastDay)).forEach((o) => {
+    cafeOrders.filter((o) => Utils.isInRange(o.createdAt, monthStart, monthEnd)).forEach((o) => {
       let c = customers.find((cu) => cu.id === o.customerId);
       data.push({ "نوع": "کافی‌شاپ", "شناسه": c ? "#" + (c.displayId || c.id) : "", "آیتم‌ها": (o.items || []).map((i) => i.name + " x" + i.qty).join("، "), "مبلغ": o.total, "روش": o.payType, "تاریخ": Jalali.formatDateTime(o.createdAt) });
     });
-    blockPayments.filter((bp) => Utils.isInRange(bp.date, firstDay, lastDay)).forEach((bp) => {
+    blockPayments.filter((bp) => Utils.isInRange(bp.date, monthStart, monthEnd)).forEach((bp) => {
       let c = customers.find((cu) => cu.id === bp.customerId);
       data.push({ "نوع": bp.deviceType === "tournament" ? "تسویه بازی مسابقه" : "تسویه بلوک", "شناسه": c ? "#" + (c.displayId || c.id) : "", "مبلغ": bp.amount, "روش": bp.payType, "تاریخ": Jalali.formatDateTime(bp.date) });
     });
@@ -740,7 +792,7 @@ const Reports = (function () {
     XLSX.utils.book_append_sheet(wb, ws, "ماهانه");
 
     // Wallet charge history within the month.
-    let monthCharges = walletCharges.filter((c) => Utils.isInRange(c.date, firstDay, lastDay));
+    let monthCharges = walletCharges.filter((c) => Utils.isInRange(c.date, monthStart, monthEnd));
     if (monthCharges.length) {
       let wsCharges = XLSX.utils.json_to_sheet(monthCharges.map((ch) => {
         let c = customers.find((cu) => cu.id === ch.customerId);
@@ -755,15 +807,22 @@ const Reports = (function () {
       XLSX.utils.book_append_sheet(wb, wsInventory, "موجودی کافی‌شاپ");
     }
 
-    // Day-close summary records within the month.
+    // Day-close summary records within the month, keyed by the business-day
+    // key (see Utils.getBusinessDayKey) that closeDay actually saves under —
+    // matching by that key, not by string-prefixing "year/month", keeps this
+    // in sync with how dailySummaries.date is produced.
     let monthSummaries = dailySummaries.filter((s) => s.date && s.date.startsWith(year + "/" + String(month).padStart(2, "0")));
     if (monthSummaries.length) {
-      let wsSummary = XLSX.utils.json_to_sheet(monthSummaries.map((s) => ({ "تاریخ": s.date, "نقدی ورودی": s.cashIn, "کارتی ورودی": s.cardIn, "نقدی خروجی": s.cashOut, "کارتی خروجی": s.cardOut })));
+      let wsSummary = XLSX.utils.json_to_sheet(monthSummaries.map((s) => ({
+        "تاریخ": s.date, "نقدی ورودی": s.cashIn, "کارتی ورودی": s.cardIn, "نقدی خروجی": s.cashOut, "کارتی خروجی": s.cardOut,
+        "شمارش‌شده نقدی": s.cashCounted != null ? s.cashCounted : "", "کارتخوان": s.cardReceived != null ? s.cardReceived : "",
+        "اختلاف نقدی": s.diffCash != null ? s.diffCash : "", "اختلاف کارتخوان": s.diffCard != null ? s.diffCard : "",
+      })));
       XLSX.utils.book_append_sheet(wb, wsSummary, "بستن روز");
     }
 
     // Tournament match settlements within the month.
-    let monthTournament = blockPayments.filter((bp) => bp.deviceType === "tournament" && Utils.isInRange(bp.date, firstDay, lastDay));
+    let monthTournament = blockPayments.filter((bp) => bp.deviceType === "tournament" && Utils.isInRange(bp.date, monthStart, monthEnd));
     if (monthTournament.length) {
       let wsTournament = XLSX.utils.json_to_sheet(monthTournament.map((bp) => {
         let c = customers.find((cu) => cu.id === bp.customerId);

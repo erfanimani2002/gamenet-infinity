@@ -28,6 +28,21 @@ const Utils = (function () {
     return { start, end: d };
   }
 
+  // The business day that is "currently open" for reporting purposes runs
+  // [23:35, next 23:35) — see getReportRange. Its Jalali calendar label is the
+  // date of the range's *end* boundary (the day whose 23:35 closes it), NOT
+  // the date `now` happens to fall on. Example: at 23:40 on day N, `now`'s
+  // calendar date is still N, but the open business day already ends at
+  // 23:35 on day N+1 — so its key must be N+1, not N. Anything that persists
+  // a "day key" (closeDay, exports) must derive it this way instead of calling
+  // Jalali.getTodayJalali()/formatDate(new Date()) directly, or it will save
+  // under the wrong calendar date for the ~24-minute window after 23:35.
+  function getBusinessDayKey(range) {
+    range = range || getReportRange();
+    let j = Jalali.gregorianToJalali(range.end.getFullYear(), range.end.getMonth() + 1, range.end.getDate());
+    return j.year + "/" + String(j.month).padStart(2, "0") + "/" + String(j.day).padStart(2, "0");
+  }
+
   function roundPrice(price, unit) {
     if (!unit || unit <= 0) return price;
     return Math.ceil(price / unit) * unit;
@@ -246,7 +261,7 @@ const Utils = (function () {
   }
 
   return {
-    getReportRange, getCurrentReportRange, roundPrice, generateId,
+    getReportRange, getCurrentReportRange, getBusinessDayKey, roundPrice, generateId,
     formatCurrency, formatCurrencyShort, calculateTimeBlocksPrice,
     calculateSessionDuration, formatDuration, formatTimerDisplay,
     isInRange, escapeHtml, renderSelectLabel,
