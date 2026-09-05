@@ -178,13 +178,8 @@ const AdminPanel = (function () {
   }
 
   async function deleteDevice(id) {
-    let device = await DB.get("devices", id);
-    if (!device) return;
-    if (device.status && device.status !== "free") {
-      App.toast("این دستگاه سشن باز دارد — ابتدا سشن را لغو یا تسویه کنید");
-      return;
-    }
     if (!confirm("آیا از حذف این دستگاه مطمئن هستید؟")) return;
+    let device = await DB.get("devices", id);
     await DB.remove("devices", id);
     await DB.logActivity("حذف دستگاه", device.name);
     App.toast("دستگاه حذف شد");

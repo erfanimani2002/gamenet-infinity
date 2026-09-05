@@ -1,12 +1,18 @@
 const Reports = (function () {
-  async function renderDaily(el) {
-    let range = Utils.getReportRange();
-    let sessions = await DB.getAll("sessions");
-    let cafeOrders = await DB.getAll("cafeOrders");
-    let debtPayments = await DB.getAll("debtPayments");
-    let walletCharges = await DB.getAll("walletCharges");
-    let purchases = await DB.getAll("purchases");
-    let blockPayments = await DB.getAll("blockPayments");
+  // Shared daily calculation used by both the daily report and (looped once per
+  // business day) the monthly report, so any future accounting fix here
+  // automatically applies to both. `preloaded`, if given, avoids refetching the
+  // whole DB on every iteration of a monthly loop.
+  async function calculateDailyTotals(range, preloaded) {
+    let sessions = (preloaded && preloaded.sessions) || await DB.getAll("sessions");
+    let cafeOrders = (preloaded && preloaded.cafeOrders) || await DB.getAll("cafeOrders");
+    let debtPayments = (preloaded && preloaded.debtPayments) || await DB.getAll("debtPayments");
+    let walletCharges = (preloaded && preloaded.walletCharges) || await DB.getAll("walletCharges");
+    let purchases = (preloaded && preloaded.purchases) || await DB.getAll("purchases");
+    let blockPayments = (preloaded && preloaded.blockPayments) || await DB.getAll("blockPayments");
+    let tournaments = (preloaded && preloaded.tournaments) || await DB.getAll("tournaments");
+    let matchData = (preloaded && preloaded.matches) || await DB.getAll("matches");
+    let payouts = (preloaded && preloaded.prizePayouts) || await DB.getAll("prizePayouts");
 
     let settledSessions = sessions.filter((s) => s.status === "settled" && s.settledAt && Utils.isInRange(s.settledAt, range.start, range.end));
     let dailyOrders = cafeOrders.filter((o) => Utils.isInRange(o.createdAt, range.start, range.end));
@@ -30,10 +36,10 @@ const Reports = (function () {
 
     let consoleBlock = { cash: 0, card: 0 };
     let billiardBlock = { cash: 0, card: 0 };
-    let tournamentMatchBlock = { cash: 0, card: 0 };
-    blockPayments.filter((bp) => Utils.isInRange(bp.date, range.start, range.end)).forEach((bp) => {
+    let dailyBlockPayments = blockPayments.filter((bp) => Utils.isInRange(bp.date, range.start, range.end));
+    dailyBlockPayments.forEach((bp) => {
       let amt = bp.amount || 0;
-      let target = bp.deviceType === "console" ? consoleBlock : bp.deviceType === "tournament" ? tournamentMatchBlock : billiardBlock;
+      let target = bp.deviceType === "console" ? consoleBlock : billiardBlock;
       if (bp.payType === "cash") target.cash += amt;
       else if (bp.payType === "card") target.card += amt;
     });
@@ -60,8 +66,6 @@ const Reports = (function () {
       else purchaseOther += p.amount;
     });
 
-    let tournaments = await DB.getAll("tournaments");
-    let matchData = await DB.getAll("matches");
     let activeMatches = matchData.filter((m) => m.status === "completed" && m.timerEnd && Utils.isInRange(m.timerEnd, range.start, range.end));
     let tournamentCash = 0, tournamentCard = 0;
     tournaments.forEach((t) => {
@@ -74,13 +78,40 @@ const Reports = (function () {
       });
     });
 
-    tournamentCash += tournamentMatchBlock.cash;
-    tournamentCard += tournamentMatchBlock.card;
+    // Prize payouts paid out as cash/card are cash-outs, the same way purchases
+    // are. A payout credited to the winner's wallet doesn't leave the till, so
+    // it's recorded but excluded from the cash/card reconciliation totals.
+    let dailyPayouts = payouts.filter((p) => Utils.isInRange(p.date, range.start, range.end));
+    let payoutCash = 0, payoutCard = 0;
+    dailyPayouts.forEach((p) => {
+      if (p.payType === "cash") payoutCash += p.amount || 0;
+      else if (p.payType === "card") payoutCard += p.amount || 0;
+    });
 
     let totalCashIn = consoleCalc.cash + consoleBlock.cash + billiardCalc.cash + billiardBlock.cash + pcCalc.cash + cafeCash + debtCash + chargeCash + tournamentCash;
     let totalCardIn = consoleCalc.card + consoleBlock.card + billiardCalc.card + billiardBlock.card + pcCalc.card + cafeCard + debtCard + chargeCard + tournamentCard;
-    let totalCashOut = purchaseCash;
-    let totalCardOut = purchaseCard;
+    let totalCashOut = purchaseCash + payoutCash;
+    let totalCardOut = purchaseCard + payoutCard;
+
+    return {
+      consoleCalc, billiardCalc, pcCalc, consoleBlock, billiardBlock,
+      cafeCash, cafeCard, debtCash, debtCard, chargeCash, chargeCard,
+      purchaseCash, purchaseCard, purchaseOther, payoutCash, payoutCard,
+      tournamentCash, tournamentCard, activeMatches,
+      totalCashIn, totalCardIn, totalCashOut, totalCardOut,
+    };
+  }
+
+  async function renderDaily(el) {
+    let range = Utils.getReportRange();
+    let d = await calculateDailyTotals(range);
+    let {
+      consoleCalc, billiardCalc, pcCalc, consoleBlock, billiardBlock,
+      cafeCash, cafeCard, debtCash, debtCard, chargeCash, chargeCard,
+      purchaseCash, purchaseCard, purchaseOther, payoutCash, payoutCard,
+      tournamentCash, tournamentCard, activeMatches,
+      totalCashIn, totalCardIn, totalCashOut, totalCardOut,
+    } = d;
 
     let html = `
       <div class="card">
@@ -149,8 +180,8 @@ const Reports = (function () {
         <div class="report-section">
           <h4>مسابقات</h4>
           <div class="report-summary">
-            <div class="summary-item"><div class="summary-label">نقدی (حق ورود + بازی‌ها)</div><div class="summary-value">${Utils.formatCurrency(tournamentCash)}</div></div>
-            <div class="summary-item"><div class="summary-label">کارتی (حق ورود + بازی‌ها)</div><div class="summary-value">${Utils.formatCurrency(tournamentCard)}</div></div>
+            <div class="summary-item"><div class="summary-label">نقدی حق ورود</div><div class="summary-value">${Utils.formatCurrency(tournamentCash)}</div></div>
+            <div class="summary-item"><div class="summary-label">کارتی حق ورود</div><div class="summary-value">${Utils.formatCurrency(tournamentCard)}</div></div>
             <div class="summary-item"><div class="summary-label">بازی‌های تکمیل‌شده</div><div class="summary-value">${activeMatches.length}</div></div>
           </div>
         </div>
@@ -164,12 +195,22 @@ const Reports = (function () {
           <div class="summary-item"><div class="summary-label">سایر</div><div class="summary-value amount negative">${Utils.formatCurrency(purchaseOther)}</div></div>
         </div>
 
+        ${(payoutCash + payoutCard) > 0 ? `
+        <div class="report-section">
+          <h4>پرداخت جایزه مسابقات</h4>
+          <div class="report-summary">
+            <div class="summary-item"><div class="summary-label">نقدی</div><div class="summary-value amount negative">${Utils.formatCurrency(payoutCash)}</div></div>
+            <div class="summary-item"><div class="summary-label">کارتی</div><div class="summary-value amount negative">${Utils.formatCurrency(payoutCard)}</div></div>
+          </div>
+        </div>
+        ` : ''}
+
         <hr class="section-divider">
         <h3>تطبیق صندوق</h3>
         <div class="report-summary">
           <div class="summary-item"><div class="summary-label">نقدی دریافتی</div><div class="summary-value">${Utils.formatCurrency(totalCashIn)}</div></div>
-          <div class="summary-item"><div class="summary-label">نقدی پرداختی (خرید)</div><div class="summary-value amount negative">${Utils.formatCurrency(purchaseCash)}</div></div>
-          <div class="summary-item"><div class="summary-label">مانده نقدی</div><div class="summary-value font-bold">${Utils.formatCurrency(totalCashIn - purchaseCash)}</div></div>
+          <div class="summary-item"><div class="summary-label">نقدی پرداختی (خرید + جایزه)</div><div class="summary-value amount negative">${Utils.formatCurrency(totalCashOut)}</div></div>
+          <div class="summary-item"><div class="summary-label">مانده نقدی</div><div class="summary-value font-bold">${Utils.formatCurrency(totalCashIn - totalCashOut)}</div></div>
         </div>
         <div class="form-inline">
           <div class="form-group"><label>مبلغ شمارش‌شده صندوق</label><input type="number" id="cashCounted" placeholder="0" min="0"></div>
@@ -184,14 +225,14 @@ const Reports = (function () {
         <div class="flex-gap">
           <button class="btn btn-primary" onclick="Reports.exportDailyExcel()">خروجی اکسل</button>
           <button class="btn btn-outline" onclick="Reports.showFullTransactions()">لیست تراکنش‌ها</button>
-          <button class="btn btn-success" onclick="Reports.closeDay(${totalCashIn}, ${totalCardIn}, ${purchaseCash}, ${totalCardOut})">بستن روز</button>
+          <button class="btn btn-success" onclick="Reports.closeDay(${totalCashIn}, ${totalCardIn}, ${totalCashOut}, ${totalCardOut})">بستن روز</button>
         </div>
       </div>
     `;
     el.innerHTML = html;
 
-    document.getElementById("cashCounted").addEventListener("input", () => calcRecon(totalCashIn - purchaseCash, totalCardIn));
-    document.getElementById("cardReceived").addEventListener("input", () => calcRecon(totalCashIn - purchaseCash, totalCardIn));
+    document.getElementById("cashCounted").addEventListener("input", () => calcRecon(totalCashIn - totalCashOut, totalCardIn));
+    document.getElementById("cardReceived").addEventListener("input", () => calcRecon(totalCashIn - totalCashOut, totalCardIn));
   }
 
   function calcRecon(systemCash, systemCard) {
@@ -280,25 +321,31 @@ const Reports = (function () {
 
     let firstDay = Jalali.getJalaliFirstDayOfMonth(year, month);
     let monthDays = Jalali.getJalaliMonthDays(year, month);
-    let lastDay = new Date(firstDay); lastDay.setDate(lastDay.getDate() + monthDays);
 
-    let sessions = await DB.getAll("sessions");
-    let cafeOrders = await DB.getAll("cafeOrders");
-    let debtPayments = await DB.getAll("debtPayments");
-
-    let monthSessions = sessions.filter((s) => s.status === "settled" && s.settledAt && Utils.isInRange(s.settledAt, firstDay, lastDay));
-    let monthOrders = cafeOrders.filter((o) => Utils.isInRange(o.createdAt, firstDay, lastDay));
-    let monthDebts = debtPayments.filter((p) => Utils.isInRange(p.date, firstDay, lastDay));
+    // Fetch each collection once and hand it to calculateDailyTotals for every
+    // day of the month, instead of refetching the whole DB per iteration.
+    let preloaded = {
+      sessions: await DB.getAll("sessions"),
+      cafeOrders: await DB.getAll("cafeOrders"),
+      debtPayments: await DB.getAll("debtPayments"),
+      walletCharges: await DB.getAll("walletCharges"),
+      purchases: await DB.getAll("purchases"),
+      blockPayments: await DB.getAll("blockPayments"),
+      tournaments: await DB.getAll("tournaments"),
+      matches: await DB.getAll("matches"),
+      prizePayouts: await DB.getAll("prizePayouts"),
+    };
 
     let dayData = {};
     for (let d = 0; d < monthDays; d++) {
-      let dayDate = new Date(firstDay); dayDate.setDate(dayDate.getDate() + d);
-      let nextDay = new Date(dayDate); nextDay.setDate(nextDay.getDate() + 1);
-      let total = 0;
-      monthSessions.filter((s) => Utils.isInRange(s.settledAt, dayDate, nextDay)).forEach((s) => total += s.settleAmount || 0);
-      monthOrders.filter((o) => Utils.isInRange(o.createdAt, dayDate, nextDay)).forEach((o) => total += o.total || 0);
-      monthDebts.filter((p) => Utils.isInRange(p.date, dayDate, nextDay)).forEach((p) => total += p.amount || 0);
-      dayData[d + 1] = total;
+      // Business day boundaries are [calendarDay-1 23:35, calendarDay 23:35), the
+      // same window Utils.getReportRange uses for "today" — computed here by
+      // passing noon of that calendar day, which always falls inside that window.
+      let calendarDay = new Date(firstDay); calendarDay.setDate(calendarDay.getDate() + d);
+      let noon = new Date(calendarDay.getFullYear(), calendarDay.getMonth(), calendarDay.getDate(), 12, 0, 0);
+      let dayRange = Utils.getReportRange(noon);
+      let totals = await calculateDailyTotals(dayRange, preloaded);
+      dayData[d + 1] = totals.totalCashIn + totals.totalCardIn;
     }
 
     let monthTotal = Object.values(dayData).reduce((s, v) => s + v, 0);
@@ -366,7 +413,20 @@ const Reports = (function () {
     blockPayments.filter((bp) => Utils.isInRange(bp.date, range.start, range.end)).forEach((bp) => {
       let device = devices.find((d) => d.id === bp.deviceId);
       let c = customers.find((cu) => cu.id === bp.customerId);
-      all.push({ txType: "blockPayment", txId: bp.id, type: bp.deviceType === "tournament" ? "تسویه بازی مسابقه" : "تسویه بلوک", device: device ? device.name : "-", amount: bp.amount || 0, payType: bp.payType, time: bp.date, ids: c ? "#" + (c.displayId || c.id) : "-" });
+      all.push({ txType: "blockPayment", txId: bp.id, type: "تسویه بلوک", device: device ? device.name : "-", amount: bp.amount || 0, payType: bp.payType, time: bp.date, ids: c ? "#" + (c.displayId || c.id) : "-" });
+    });
+
+    let tournaments = await DB.getAll("tournaments");
+    let matchData = await DB.getAll("matches");
+    tournaments.filter((t) => t.status === "completed" && t.createdAt && Utils.isInRange(t.createdAt, range.start, range.end)).forEach((t) => {
+      let completedMatches = matchData.filter((m) => m.tournamentId === t.id && m.status === "completed");
+      completedMatches.forEach((m) => {
+        let cA = customers.find((cu) => cu.id === m.playerA);
+        let cB = customers.find((cu) => cu.id === m.playerB);
+        let nameA = cA ? "#" + (cA.displayId || cA.id) : "-";
+        let nameB = cB ? "#" + (cB.displayId || cB.id) : "-";
+        all.push({ txType: "match", txId: m.id, type: "مسابقه", device: t.name, amount: m.deviceCost || 0, payType: "tournament", time: m.timerEnd || t.createdAt, ids: nameA + " vs " + nameB });
+      });
     });
     all.sort((a, b) => new Date(b.time) - new Date(a.time));
 
@@ -386,13 +446,6 @@ const Reports = (function () {
         let idsText = (s.ids || []).map((id) => { let c = customers.find((cu) => cu.id === id); return "#" + (c ? (c.displayId || c.id) : id); }).join(", ");
         t = { type: "session", session: s, typeName: s.deviceType === "console" ? "کنسول" : s.deviceType === "billiard" ? "بیلیارد" : "پی‌سی", device: device ? device.name : "-", amount: s.settleAmount || 0, payType: s.settlePayType, ids: idsText };
       }
-    } else if (txType === "blockPayment") {
-      let bp = await DB.get("blockPayments", txId);
-      if (bp) {
-        let customers = await DB.getAll("customers");
-        let c = customers.find((cu) => cu.id === bp.customerId);
-        t = { type: "blockPayment", blockPayment: bp, typeName: bp.deviceType === "tournament" ? "تسویه بازی مسابقه" : "تسویه بلوک", device: "-", amount: bp.amount || 0, payType: bp.payType, ids: c ? "#" + (c.displayId || c.id) : "-" };
-      }
     } else {
       let o = await DB.get("cafeOrders", txId);
       if (o) {
@@ -403,16 +456,14 @@ const Reports = (function () {
     }
     if (!t) return;
 
-    let editId = t.type === 'session' ? t.session.id : t.type === 'blockPayment' ? t.blockPayment.id : t.order.id;
-
     App.openModal(`
       <h2>ویرایش تراکنش</h2>
       <div class="list-row"><span class="row-label">نوع</span><span class="row-value">${t.typeName}</span></div>
       <div class="form-group"><label>مبلغ</label><input type="number" id="editTxAmount" value="${t.amount}" min="0"></div>
       <div class="form-group"><label>روش پرداخت</label><select id="editTxPayType"><option value="cash" ${t.payType === 'cash' ? 'selected' : ''}>نقدی</option><option value="card" ${t.payType === 'card' ? 'selected' : ''}>کارتی</option><option value="wallet" ${t.payType === 'wallet' ? 'selected' : ''}>کیف‌پول</option><option value="debt" ${t.payType === 'debt' ? 'selected' : ''}>بدهکاری</option></select></div>
       <div class="modal-actions">
-        <button class="btn btn-success" onclick="Reports.saveEditTransaction('${t.type}', ${editId})">ذخیره</button>
-        <button class="btn btn-danger" onclick="Reports.deleteTransaction('${t.type}', ${editId})">حذف</button>
+        <button class="btn btn-success" onclick="Reports.saveEditTransaction('${t.type}', ${t.type === 'session' ? t.session.id : t.order.id})">ذخیره</button>
+        <button class="btn btn-danger" onclick="Reports.deleteTransaction('${t.type}', ${t.type === 'session' ? t.session.id : t.order.id})">حذف</button>
         <button class="btn btn-outline" onclick="App.closeModalForce()">انصراف</button>
       </div>
     `);
@@ -441,27 +492,21 @@ const Reports = (function () {
       if (session) {
         let oldAmount = session.settleAmount || 0;
         let oldPayType = session.settlePayType || "cash";
-        let customerId = (session.ids && session.ids[0]) || null;
+        let customerId = session.settlePayerId || (session.ids && session.ids[0]) || null;
         if (customerId && (oldAmount !== newAmount || oldPayType !== newPayType)) {
           await reversePayment(customerId, oldAmount, oldPayType);
-          await Utils.applyPayment(customerId, newAmount, newPayType);
+          let payResult = await Utils.applyPayment(customerId, newAmount, newPayType);
+          if (!payResult.success) {
+            // Roll back to the original payment so the reversal above doesn't
+            // leave the customer's balance short with nothing recorded.
+            await Utils.applyPayment(customerId, oldAmount, oldPayType);
+            App.toast(payResult.reason === "insufficient_wallet" ? "موجودی کیف‌پول کافی نیست" : "پرداخت ناموفق بود");
+            return;
+          }
         }
         session.settleAmount = newAmount;
         session.settlePayType = newPayType;
         await DB.put("sessions", session);
-      }
-    } else if (type === "blockPayment") {
-      let bp = await DB.get("blockPayments", id);
-      if (bp) {
-        let oldAmount = bp.amount || 0;
-        let oldPayType = bp.payType || "cash";
-        if (bp.customerId && (oldAmount !== newAmount || oldPayType !== newPayType)) {
-          await reversePayment(bp.customerId, oldAmount, oldPayType);
-          await Utils.applyPayment(bp.customerId, newAmount, newPayType);
-        }
-        bp.amount = newAmount;
-        bp.payType = newPayType;
-        await DB.put("blockPayments", bp);
       }
     } else {
       let order = await DB.get("cafeOrders", id);
@@ -470,7 +515,12 @@ const Reports = (function () {
         let oldPayType = order.payType || "cash";
         if (order.customerId && (oldAmount !== newAmount || oldPayType !== newPayType)) {
           await reversePayment(order.customerId, oldAmount, oldPayType);
-          await Utils.applyPayment(order.customerId, newAmount, newPayType);
+          let payResult = await Utils.applyPayment(order.customerId, newAmount, newPayType);
+          if (!payResult.success) {
+            await Utils.applyPayment(order.customerId, oldAmount, oldPayType);
+            App.toast(payResult.reason === "insufficient_wallet" ? "موجودی کیف‌پول کافی نیست" : "پرداخت ناموفق بود");
+            return;
+          }
         }
         order.total = newAmount;
         order.payType = newPayType;
@@ -487,32 +537,13 @@ const Reports = (function () {
     if (type === "session") {
       let session = await DB.get("sessions", id);
       if (session) {
-        let customerId = (session.ids && session.ids[0]) || null;
+        let customerId = session.settlePayerId || (session.ids && session.ids[0]) || null;
         if (customerId) {
           await reversePayment(customerId, session.settleAmount || 0, session.settlePayType || "cash");
         }
         session.status = "deleted";
         session.settledAt = null;
         await DB.put("sessions", session);
-      }
-    } else if (type === "blockPayment") {
-      let bp = await DB.get("blockPayments", id);
-      if (bp) {
-        if (bp.customerId) {
-          await reversePayment(bp.customerId, bp.amount || 0, bp.payType || "cash");
-        }
-        if (bp.deviceType === "tournament" && bp.matchId) {
-          let match = await DB.get("matches", bp.matchId);
-          if (match) {
-            match.settled = false;
-            match.settlePayType = null;
-            match.settleAmount = 0;
-            match.settlerName = "";
-            match.settledAt = null;
-            await DB.put("matches", match);
-          }
-        }
-        await DB.remove("blockPayments", id);
       }
     } else {
       let order = await DB.get("cafeOrders", id);
@@ -583,5 +614,5 @@ const Reports = (function () {
     App.toast("اکسل دانلود شد");
   }
 
-  return { renderDaily, renderInstant, renderMonthly, loadMonthlyReport, showFullTransactions, exportDailyExcel, exportMonthlyExcel, closeDay, editTransaction, saveEditTransaction, deleteTransaction, reversePayment };
+  return { renderDaily, renderInstant, renderMonthly, loadMonthlyReport, showFullTransactions, exportDailyExcel, exportMonthlyExcel, closeDay, editTransaction, saveEditTransaction, deleteTransaction, reversePayment, calculateDailyTotals };
 })();

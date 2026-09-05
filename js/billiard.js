@@ -84,6 +84,10 @@ const Billiard = (function () {
 
   async function startSession(deviceId) {
     selectedIds = [];
+    await renderStartSessionModal(deviceId);
+  }
+
+  async function renderStartSessionModal(deviceId) {
     let customers = await DB.getAll("customers");
     App.openModal(`
       <h2>شروع سشن بیلیارد</h2>
@@ -93,6 +97,7 @@ const Billiard = (function () {
         <div style="max-height:200px;overflow-y:auto;margin-top:8px;">
           ${customers.map((c) => `<div class="list-row customer-pick" data-search="${String(c.displayId || c.id)}" onclick="Billiard.pickCustomer(${c.id})" style="cursor:pointer"><span class="row-label">#${c.displayId || c.id}</span></div>`).join("")}
         </div>
+        <button class="btn btn-sm btn-outline" style="margin-top:6px;" onclick="Billiard.quickCreateCustomer(${deviceId})">+ مشتری جدید سریع</button>
       </div>
       <div class="form-group"><label>انتخاب شده</label><div id="bSelectedIds" class="text-muted text-sm">هیچ شناسه‌ای</div></div>
       <div class="form-group"><label>تعداد چوب</label><select id="bStickCount"><option value="2">دوچوب</option><option value="4">چهارچوب</option></select></div>
@@ -102,6 +107,14 @@ const Billiard = (function () {
         <button class="btn btn-outline" onclick="App.closeModalForce()">انصراف</button>
       </div>
     `);
+    updateSelectedIds();
+  }
+
+  function quickCreateCustomer(deviceId) {
+    Customers.promptQuickCreate(async (result) => {
+      pickCustomer(result.id);
+      await renderStartSessionModal(deviceId);
+    });
   }
 
   function filterCustomers() { let q = document.getElementById("bSearch").value.toLowerCase(); document.querySelectorAll(".customer-pick").forEach((r) => { r.style.display = r.dataset.search.includes(q) ? "flex" : "none"; }); }
@@ -206,33 +219,45 @@ const Billiard = (function () {
   }
 
   async function settleSingleBlock(deviceId, blockIndex) {
-    let sessions = await DB.getAll("sessions");
-    let session = sessions.find((s) => s.deviceId === deviceId && s.status === "active");
-    if (!session) return;
+    await Utils.guardDoubleClick(async () => {
+      let sessions = await DB.getAll("sessions");
+      let session = sessions.find((s) => s.deviceId === deviceId && s.status === "active");
+      if (!session) return { success: false };
 
-    let block = session.timeBlocks[blockIndex];
-    if (!block || !block.endTime || block.settled) { App.toast("بلوک قابل تسویه نیست"); return; }
+      let block = session.timeBlocks[blockIndex];
+      if (!block || !block.endTime || block.settled) { App.toast("بلوک قابل تسویه نیست"); return { success: false }; }
 
-    let payerId = parseInt(document.getElementById("bPayer_" + blockIndex).value) || 0;
-    let payType = document.getElementById("bPayType_" + blockIndex).value;
-    let settlerEl = document.getElementById("bSettler_" + blockIndex);
-    let settlerName = settlerEl ? settlerEl.options[settlerEl.selectedIndex]?.text : "";
+      let payerId = parseInt(document.getElementById("bPayer_" + blockIndex).value) || 0;
+      let payType = document.getElementById("bPayType_" + blockIndex).value;
+      let settlerEl = document.getElementById("bSettler_" + blockIndex);
+      let settlerName = settlerEl ? settlerEl.options[settlerEl.selectedIndex]?.text : "";
 
-    await Utils.applyPayment(payerId, block.price, payType);
-    block.settled = true;
-    block.settlePayType = payType;
-    block.settlerName = settlerName;
-    block.settledAt = new Date().toISOString();
-    await DB.put("sessions", session);
-    await DB.add("blockPayments", {
-      customerId: payerId, sessionId: session.id, deviceId,
-      deviceType: session.deviceType, blockIndex,
-      amount: block.price, payType, settlerName,
-      date: new Date().toISOString()
+      let customer = await DB.get("customers", payerId);
+      let payResult = Utils.computePaymentUpdate(customer, block.price, payType);
+      if (!payResult.success) {
+        App.toast(payResult.reason === "insufficient_wallet" ? "موجودی کیف‌پول کافی نیست" : "پرداخت ناموفق بود");
+        return { success: false };
+      }
+      block.settled = true;
+      block.settlePayType = payType;
+      block.settlerName = settlerName;
+      block.settledAt = new Date().toISOString();
+
+      await DB.runAtomic([
+        { store: "customers", type: "put", data: payResult.customer },
+        { store: "sessions", type: "put", data: session },
+        { store: "blockPayments", type: "add", data: {
+          customerId: payerId, sessionId: session.id, deviceId,
+          deviceType: session.deviceType, blockIndex,
+          amount: block.price, payType, settlerName,
+          date: new Date().toISOString()
+        } },
+      ]);
+      await DB.logActivity("تسویه بلوک بیلیارد", "سشن #" + session.id + " | بلوک " + (blockIndex + 1) + " | " + Utils.formatCurrency(block.price) + " | " + payType + " | " + settlerName);
+      App.toast("بلوک تسویه شد");
+      settleBlock(deviceId);
+      return { success: true };
     });
-    await DB.logActivity("تسویه بلوک بیلیارد", "سشن #" + session.id + " | بلوک " + (blockIndex + 1) + " | " + Utils.formatCurrency(block.price) + " | " + payType + " | " + settlerName);
-    App.toast("بلوک تسویه شد");
-    settleBlock(deviceId);
   }
 
   async function settleSession(deviceId) {
@@ -278,21 +303,34 @@ const Billiard = (function () {
   }
 
   async function confirmSettleSession(deviceId, total, discount) {
-    let payerId = parseInt(document.getElementById("payerId").value) || 0;
-    let payType = document.getElementById("settlePayType").value;
-    let settlerName = Utils.getSettlerName();
-    let finalAmount = total - (discount || 0);
+    await Utils.guardDoubleClick(async () => {
+      let payerId = parseInt(document.getElementById("payerId").value) || 0;
+      let payType = document.getElementById("settlePayType").value;
+      let settlerName = Utils.getSettlerName();
+      let finalAmount = total - (discount || 0);
 
-    let sessions = await DB.getAll("sessions");
-    let session = sessions.find((s) => s.deviceId === deviceId && s.status === "active");
-    if (!session) return;
-    await Utils.applyPayment(payerId, finalAmount, payType);
-    session.status = "settled"; session.settledAt = new Date().toISOString(); session.settlePayType = payType; session.settleAmount = finalAmount; session.discount = discount || 0; session.settlerName = settlerName;
-    session.timeBlocks.forEach((b) => { b.settled = true; });
-    await DB.put("sessions", session);
-    await DB.put("devices", { ...await DB.get("devices", deviceId), status: "free" });
-    await DB.logActivity("تسویه کل بیلیارد", "سشن #" + session.id + " | " + Utils.formatCurrency(finalAmount) + " | " + payType + " | " + settlerName);
-    App.stopTimer("timer-billiard-" + deviceId); App.closeModalForce(); App.toast("تسویه شد"); refresh();
+      let sessions = await DB.getAll("sessions");
+      let session = sessions.find((s) => s.deviceId === deviceId && s.status === "active");
+      if (!session) return { success: false };
+
+      let customer = await DB.get("customers", payerId);
+      let payResult = Utils.computePaymentUpdate(customer, finalAmount, payType);
+      if (!payResult.success) {
+        App.toast(payResult.reason === "insufficient_wallet" ? "موجودی کیف‌پول کافی نیست" : "پرداخت ناموفق بود");
+        return { success: false };
+      }
+      session.status = "settled"; session.settledAt = new Date().toISOString(); session.settlePayType = payType; session.settleAmount = finalAmount; session.discount = discount || 0; session.settlerName = settlerName; session.settlePayerId = payerId;
+      session.timeBlocks.forEach((b) => { b.settled = true; });
+
+      await DB.runAtomic([
+        { store: "customers", type: "put", data: payResult.customer },
+        { store: "sessions", type: "put", data: session },
+      ]);
+      await DB.put("devices", { ...await DB.get("devices", deviceId), status: "free" });
+      await DB.logActivity("تسویه کل بیلیارد", "سشن #" + session.id + " | " + Utils.formatCurrency(finalAmount) + " | " + payType + " | " + settlerName);
+      App.stopTimer("timer-billiard-" + deviceId); App.closeModalForce(); App.toast("تسویه شد"); refresh();
+      return { success: true };
+    });
   }
 
   async function showSessionDetail(deviceId) {
@@ -403,16 +441,19 @@ const Billiard = (function () {
         if (cafeItem && !cafeItem.unlimited) { cafeItem.stock += (it.qty || 1); await DB.put("cafeItems", cafeItem); }
       }
     }
-    // Reverse payments from settled blocks
-    for (let b of (session.timeBlocks || [])) {
-      if (b.settled && b.settlePayType && session.ids && session.ids[0]) {
-        await Reports.reversePayment(session.ids[0], b.price || 0, b.settlePayType);
-      }
-    }
-    // Remove block payment records
+    // Reverse payments from settled blocks against whichever customer actually
+    // paid for each block (recorded in blockPayments), not just the session's
+    // first customer — a different attendee may have settled that block.
     let allBp = await DB.getAll("blockPayments");
-    for (let bp of allBp.filter((bp) => bp.sessionId === session.id)) {
-      await DB.remove("blockPayments", bp.id);
+    for (let i = 0; i < (session.timeBlocks || []).length; i++) {
+      let b = session.timeBlocks[i];
+      if (!b.settled || !b.settlePayType) continue;
+      let bp = allBp.find((r) => r.sessionId === session.id && r.blockIndex === i);
+      let payerId = bp ? bp.customerId : (session.ids && session.ids[0]);
+      if (payerId) {
+        await Reports.reversePayment(payerId, b.price || 0, b.settlePayType);
+      }
+      if (bp) await DB.remove("blockPayments", bp.id);
     }
 
     App.stopTimer("timer-billiard-" + deviceId);
@@ -425,5 +466,5 @@ const Billiard = (function () {
 
   function refresh() { let el = document.getElementById("tab-billiard"); if (el && el.classList.contains("active")) render(el); }
 
-  return { render, startSession, confirmStartSession, openBlock, closeBlock, settleBlock, settleSingleBlock, settleSession, confirmSettleSession, showSessionDetail, showAddItem, addItemClick, transferSession, confirmTransfer, cancelSession, filterCustomers, pickCustomer, removeSelectedId, refresh };
+  return { render, startSession, confirmStartSession, openBlock, closeBlock, settleBlock, settleSingleBlock, settleSession, confirmSettleSession, showSessionDetail, showAddItem, addItemClick, transferSession, confirmTransfer, cancelSession, quickCreateCustomer, filterCustomers, pickCustomer, removeSelectedId, refresh };
 })();

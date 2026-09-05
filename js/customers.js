@@ -389,9 +389,39 @@ const Customers = (function () {
       tournamentInterests: [],
       createdAt: new Date().toISOString(),
     };
-    await DB.add("customers", customer);
+    let id = await DB.add("customers", customer);
     await DB.logActivity("ساخت سریع شناسه", "ایدی #" + displayId + " - " + firstName);
-    return displayId;
+    return { id, displayId };
+  }
+
+  // Opens a tiny inline prompt to create a customer on the fly (e.g. from a
+  // session/order start screen where the customer doesn't have an ID yet).
+  // Calls onCreated({id, displayId}) once the new customer is saved.
+  function promptQuickCreate(onCreated) {
+    window.__quickCreateCallback = onCreated;
+    App.openModal(`
+      <h2>مشتری جدید سریع</h2>
+      <div class="form-group"><label>نام</label><input type="text" id="qcFirstName" placeholder="نام"></div>
+      <div class="form-group"><label>نام خانوادگی (اختیاری)</label><input type="text" id="qcLastName" placeholder="نام خانوادگی"></div>
+      <div class="form-group"><label>تلفن (اختیاری)</label><input type="text" id="qcPhone" placeholder="تلفن"></div>
+      <div class="modal-actions">
+        <button class="btn btn-success" onclick="Customers.confirmQuickCreate()">ساخت</button>
+        <button class="btn btn-outline" onclick="App.closeModalForce()">انصراف</button>
+      </div>
+    `);
+  }
+
+  async function confirmQuickCreate() {
+    let firstName = document.getElementById("qcFirstName").value.trim();
+    if (!firstName) { App.toast("نام را وارد کنید"); return; }
+    let lastName = document.getElementById("qcLastName").value.trim();
+    let phone = document.getElementById("qcPhone").value.trim();
+    let result = await quickCreate(firstName, lastName, phone);
+    App.closeModalForce();
+    App.toast("مشتری #" + result.displayId + " ساخته شد");
+    let cb = window.__quickCreateCallback;
+    window.__quickCreateCallback = null;
+    if (cb) cb(result);
   }
 
   function refresh() {
@@ -404,6 +434,6 @@ const Customers = (function () {
   return {
     render, showAddCustomer, saveCustomer, showProfile, saveProfile,
     showChargeWallet, doCharge, showPayDebt, doPayDebt,
-    showManualAdjust, doManualAdjust, getCustomerName, quickCreate, filterList, refresh,
+    showManualAdjust, doManualAdjust, getCustomerName, quickCreate, promptQuickCreate, confirmQuickCreate, filterList, refresh,
   };
 })();

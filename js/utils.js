@@ -92,7 +92,10 @@ const Utils = (function () {
 
   function isInRange(date, start, end) {
     let d = new Date(date);
-    return d >= new Date(start) && d <= new Date(end);
+    // End is exclusive: consecutive business-day ranges from getReportRange share
+    // a boundary instant (day N's end === day N+1's start), so an inclusive end
+    // would double-count a transaction landing exactly on that millisecond.
+    return d >= new Date(start) && d < new Date(end);
   }
 
   function escapeHtml(str) {
@@ -107,26 +110,57 @@ const Utils = (function () {
     return item ? item.label : value;
   }
 
-  async function applyPayment(customerId, amount, payType) {
-    let customer = await DB.get("customers", customerId);
-    if (!customer) return;
-
+  // Computes the customer mutation for a payment without writing it to the DB,
+  // so callers that need to persist it atomically alongside other store writes
+  // (see DB.runAtomic) can do so in one transaction.
+  function computePaymentUpdate(customer, amount, payType) {
+    if (!customer) return { success: false, reason: "no_customer" };
     if (payType === "wallet") {
-      if (customer.wallet >= amount) {
-        customer.wallet -= amount;
-        customer.totalPaid = (customer.totalPaid || 0) + amount;
-      } else {
-        let remaining = amount - customer.wallet;
-        customer.totalPaid = (customer.totalPaid || 0) + customer.wallet;
-        customer.wallet = 0;
-        customer.debt = (customer.debt || 0) + remaining;
+      // Partial wallet payments are disallowed: applyPayment/reversePayment must
+      // stay true inverses of each other, and a wallet payment that silently
+      // spills into debt cannot be reversed correctly later (see bug #1).
+      if ((customer.wallet || 0) < amount) {
+        return { success: false, reason: "insufficient_wallet" };
       }
+      customer.wallet -= amount;
+      customer.totalPaid = (customer.totalPaid || 0) + amount;
     } else if (payType === "debt") {
       customer.debt = (customer.debt || 0) + amount;
     } else {
       customer.totalPaid = (customer.totalPaid || 0) + amount;
     }
-    await DB.put("customers", customer);
+    return { success: true, customer };
+  }
+
+  async function applyPayment(customerId, amount, payType) {
+    let customer = await DB.get("customers", customerId);
+    let result = computePaymentUpdate(customer, amount, payType);
+    if (!result.success) return result;
+    await DB.put("customers", result.customer);
+    return { success: true };
+  }
+
+  // Prevents a double-click (or a second click before the first finishes) from
+  // firing the same settle/payment action twice. Disables the clicked button
+  // for the duration of `fn`, re-enabling it only if `fn` throws or returns a
+  // falsy/`{success:false}` result — a successful action normally closes the
+  // modal or re-renders, so there's no button left to re-enable.
+  async function guardDoubleClick(fn) {
+    let btn = window.event && window.event.target && window.event.target.closest
+      ? window.event.target.closest("button")
+      : null;
+    if (btn) {
+      if (btn.disabled) return; // already processing this click
+      btn.disabled = true;
+    }
+    try {
+      let result = await fn();
+      if (btn && result && result.success === false) btn.disabled = false;
+      return result;
+    } catch (err) {
+      if (btn) btn.disabled = false;
+      throw err;
+    }
   }
 
   async function getSettlerOptions() {
@@ -169,7 +203,7 @@ const Utils = (function () {
     formatCurrency, formatCurrencyShort, calculateTimeBlocksPrice,
     calculateSessionDuration, formatDuration, formatTimerDisplay,
     isInRange, escapeHtml, renderSelectLabel,
-    applyPayment, getSettlerOptions, renderSettlerSelect, getSettlerName, getCustomerDisplayId,
+    applyPayment, computePaymentUpdate, guardDoubleClick, getSettlerOptions, renderSettlerSelect, getSettlerName, getCustomerDisplayId,
     getJalaliWeekday,
   };
 })();

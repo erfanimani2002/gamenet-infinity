@@ -59,6 +59,10 @@ const PCs = (function () {
 
   async function turnOn(deviceId) {
     selectedIds = [];
+    await renderTurnOnModal(deviceId);
+  }
+
+  async function renderTurnOnModal(deviceId) {
     let customers = await DB.getAll("customers");
     App.openModal(`
       <h2>روشن کردن پی‌سی</h2>
@@ -72,6 +76,7 @@ const PCs = (function () {
             </div>
           `).join("")}
         </div>
+        <button class="btn btn-sm btn-outline" style="margin-top:6px;" onclick="PCs.quickCreateCustomer(${deviceId})">+ مشتری جدید سریع</button>
       </div>
       <div class="form-group">
         <label>شناسه انتخاب شده</label>
@@ -82,6 +87,14 @@ const PCs = (function () {
         <button class="btn btn-outline" onclick="App.closeModalForce()">انصراف</button>
       </div>
     `);
+    updateSelectedIds();
+  }
+
+  function quickCreateCustomer(deviceId) {
+    Customers.promptQuickCreate(async (result) => {
+      pickCustomer(result.id);
+      await renderTurnOnModal(deviceId);
+    });
   }
 
   function filterCustomers() {
@@ -155,31 +168,44 @@ const PCs = (function () {
   }
 
   async function confirmTurnOff(deviceId) {
-    let sessions = await DB.getAll("sessions");
-    let session = sessions.find((s) => s.deviceId === deviceId && s.status === "active");
-    if (!session) return;
+    await Utils.guardDoubleClick(async () => {
+      let sessions = await DB.getAll("sessions");
+      let session = sessions.find((s) => s.deviceId === deviceId && s.status === "active");
+      if (!session) return { success: false };
 
-    let gameAmount = parseInt(document.getElementById("pcGameAmount").value) || 0;
-    let totalItems = (session.items || []).reduce((s, i) => s + (i.price * i.qty), 0);
-    let total = gameAmount + totalItems;
-    let payerId = parseInt(document.getElementById("payerId").value) || 0;
-    let payType = document.getElementById("settlePayType").value;
-    let settlerName = Utils.getSettlerName();
+      let gameAmount = parseInt(document.getElementById("pcGameAmount").value) || 0;
+      let totalItems = (session.items || []).reduce((s, i) => s + (i.price * i.qty), 0);
+      let total = gameAmount + totalItems;
+      let payerId = parseInt(document.getElementById("payerId").value) || 0;
+      let payType = document.getElementById("settlePayType").value;
+      let settlerName = Utils.getSettlerName();
 
-    await Utils.applyPayment(payerId, total, payType);
+      let customer = await DB.get("customers", payerId);
+      let payResult = Utils.computePaymentUpdate(customer, total, payType);
+      if (!payResult.success) {
+        App.toast(payResult.reason === "insufficient_wallet" ? "موجودی کیف‌پول کافی نیست" : "پرداخت ناموفق بود");
+        return { success: false };
+      }
 
-    session.status = "settled";
-    session.settledAt = new Date().toISOString();
-    session.settlePayType = payType;
-    session.settleAmount = total;
-    session.gameAmount = gameAmount;
-    session.settlerName = settlerName;
-    await DB.put("sessions", session);
-    await DB.put("devices", { ...await DB.get("devices", deviceId), status: "free" });
-    await DB.logActivity("خاموش + تسویه پی‌سی", "سشن #" + session.id + " | بازی: " + Utils.formatCurrency(gameAmount) + " | آیتم: " + Utils.formatCurrency(totalItems) + " | " + payType + " | " + settlerName);
-    App.closeModalForce();
-    App.toast("پی‌سی خاموش و تسویه شد");
-    refresh();
+      session.status = "settled";
+      session.settledAt = new Date().toISOString();
+      session.settlePayType = payType;
+      session.settleAmount = total;
+      session.gameAmount = gameAmount;
+      session.settlerName = settlerName;
+      session.settlePayerId = payerId;
+
+      await DB.runAtomic([
+        { store: "customers", type: "put", data: payResult.customer },
+        { store: "sessions", type: "put", data: session },
+      ]);
+      await DB.put("devices", { ...await DB.get("devices", deviceId), status: "free" });
+      await DB.logActivity("خاموش + تسویه پی‌سی", "سشن #" + session.id + " | بازی: " + Utils.formatCurrency(gameAmount) + " | آیتم: " + Utils.formatCurrency(totalItems) + " | " + payType + " | " + settlerName);
+      App.closeModalForce();
+      App.toast("پی‌سی خاموش و تسویه شد");
+      refresh();
+      return { success: true };
+    });
   }
 
   async function showSessionDetail(deviceId) {
@@ -251,16 +277,19 @@ const PCs = (function () {
       }
     }
 
-    // Reverse payments from settled time blocks
-    for (let b of (session.timeBlocks || [])) {
-      if (b.settled && b.settlePayType && session.ids && session.ids[0]) {
-        await Reports.reversePayment(session.ids[0], b.price || 0, b.settlePayType);
-      }
-    }
-    // Remove block payment records
+    // Reverse payments from settled time blocks against whichever customer
+    // actually paid for each block (recorded in blockPayments), not just the
+    // session's first customer.
     let allBp = await DB.getAll("blockPayments");
-    for (let bp of allBp.filter((bp) => bp.sessionId === session.id)) {
-      await DB.remove("blockPayments", bp.id);
+    for (let i = 0; i < (session.timeBlocks || []).length; i++) {
+      let b = session.timeBlocks[i];
+      if (!b.settled || !b.settlePayType) continue;
+      let bp = allBp.find((r) => r.sessionId === session.id && r.blockIndex === i);
+      let payerId = bp ? bp.customerId : (session.ids && session.ids[0]);
+      if (payerId) {
+        await Reports.reversePayment(payerId, b.price || 0, b.settlePayType);
+      }
+      if (bp) await DB.remove("blockPayments", bp.id);
     }
 
     await DB.remove("sessions", session.id);
@@ -277,7 +306,7 @@ const PCs = (function () {
 
   return {
     render, turnOn, confirmTurnOn, turnOff, confirmTurnOff,
-    showSessionDetail, showAddItem, addItemClick, cancelSession,
+    showSessionDetail, showAddItem, addItemClick, cancelSession, quickCreateCustomer,
     filterCustomers, pickCustomer, refresh,
   };
 })();

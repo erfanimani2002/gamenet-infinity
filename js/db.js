@@ -1,6 +1,6 @@
 const DB = (function () {
   const DB_NAME = "GameNetInfinity";
-  const DB_VERSION = 4;
+  const DB_VERSION = 5;
   let db = null;
 
   const STORES = {
@@ -24,6 +24,7 @@ const DB = (function () {
     matches: { keyPath: "id", autoIncrement: true },
     tournamentParticipants: { keyPath: "id", autoIncrement: true },
     blockPayments: { keyPath: "id", autoIncrement: true },
+    prizePayouts: { keyPath: "id", autoIncrement: true },
   };
 
   const INDEXES = {
@@ -41,6 +42,7 @@ const DB = (function () {
     matches: [{ name: "by_tournament", keyPath: "tournamentId" }],
     tournamentParticipants: [{ name: "by_tournament", keyPath: "tournamentId" }],
     blockPayments: [{ name: "by_session", keyPath: "sessionId" }],
+    prizePayouts: [{ name: "by_tournament", keyPath: "tournamentId" }],
   };
 
   function open() {
@@ -185,6 +187,26 @@ const DB = (function () {
     });
   }
 
+  // Runs several store writes (put/add) inside a single IndexedDB transaction so
+  // they either all succeed or all fail together. `ops` is an array of
+  // { store, type: "put"|"add", data } objects. Returns an array of the
+  // resulting keys, in the same order as `ops`.
+  async function runAtomic(ops) {
+    await open();
+    let storeNames = [...new Set(ops.map((o) => o.store))];
+    return new Promise((resolve, reject) => {
+      let tx = db.transaction(storeNames, "readwrite");
+      let results = new Array(ops.length);
+      tx.onerror = () => reject(tx.error);
+      tx.oncomplete = () => resolve(results);
+      ops.forEach((op, i) => {
+        let store = tx.objectStore(op.store);
+        let req = op.type === "add" ? store.add(op.data) : store.put(op.data);
+        req.onsuccess = () => { results[i] = req.result; };
+      });
+    });
+  }
+
   function logActivity(event, details, userId) {
     return add("activityLog", {
       event: event,
@@ -237,6 +259,7 @@ const DB = (function () {
     setSetting,
     exportAll,
     importAll,
+    runAtomic,
     logActivity,
     initDefaults,
   };

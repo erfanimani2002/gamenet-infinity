@@ -226,47 +226,16 @@ const Tournaments = (function () {
   }
 
   async function deleteTournament(id) {
-    if (!confirm("آیا از حذف این مسابقه مطمئن هستید؟ در صورت وجود پرداخت‌های ثبت‌شده (حق ورود یا تسویه بازی‌ها)، مبالغ به حساب مشتریان بازگردانده می‌شود.")) return;
+    if (!confirm("آیا از حذف این مسابقه مطمئن هستید؟")) return;
     let t = await DB.get("tournaments", id);
-    if (!t) return;
-
     let matches;
     try { matches = await DB.getByIndex("matches", "by_tournament", id); } catch (e) { matches = (await DB.getAll("matches")).filter((m) => m.tournamentId === id); }
-
-    // Reverse settled match payments (device cost + items) before removing matches
-    let allBlockPayments = await DB.getAll("blockPayments");
-    for (let m of matches) {
-      if (m.settled) {
-        let bp = allBlockPayments.find((b) => b.deviceType === "tournament" && b.matchId === m.id);
-        if (bp) {
-          await Reports.reversePayment(bp.customerId, bp.amount || 0, bp.payType || "cash");
-          await DB.remove("blockPayments", bp.id);
-        } else {
-          // Fallback for records created before blockPayments tracking existed
-          let matchPlayers = [m.playerA, m.playerB].filter(Boolean);
-          let fallbackPayer = m.winner ? (m.winner === m.playerA ? m.playerB : m.playerA) : matchPlayers[0];
-          if (fallbackPayer) await Reports.reversePayment(fallbackPayer, m.settleAmount || 0, m.settlePayType || "cash");
-        }
-      }
-      await DB.remove("matches", m.id);
-    }
-
-    // Reverse collected entry fees before removing the tournament
-    if (t.entryFeeStatus) {
-      for (let participantId of Object.keys(t.entryFeeStatus)) {
-        let efs = t.entryFeeStatus[participantId];
-        if (efs && efs.collected) {
-          let payerId = efs.payerId || parseInt(participantId);
-          await Reports.reversePayment(payerId, t.entryFee || 0, efs.payType || "cash");
-        }
-      }
-    }
-
+    for (let m of matches) await DB.remove("matches", m.id);
     let parts;
     try { parts = await DB.getByIndex("tournamentParticipants", "by_tournament", id); } catch (e) { parts = []; }
     for (let p of parts) await DB.remove("tournamentParticipants", p.id);
     await DB.remove("tournaments", id);
-    await DB.logActivity("حذف مسابقه", t.name + " — پرداخت‌های ثبت‌شده بازگردانده شد");
+    await DB.logActivity("حذف مسابقه", t.name);
     App.toast("مسابقه حذف شد");
     refresh();
   }
@@ -290,6 +259,8 @@ const Tournaments = (function () {
     try { matches = await DB.getByIndex("matches", "by_tournament", id); } catch (e) { matches = (await DB.getAll("matches")).filter((m) => m.tournamentId === id); }
     let customers = await DB.getAll("customers");
     let participants = t.participants || [];
+    let allPayouts = await DB.getAll("prizePayouts");
+    let tournamentPayouts = allPayouts.filter((p) => p.tournamentId === id);
 
     let gameInfo = GAME_TYPES[t.gameType];
     let st = STATUS[t.status];
@@ -343,7 +314,7 @@ const Tournaments = (function () {
 
         ${standingsHtml}
 
-        ${(t.status === 'in_progress' || t.status === 'completed') ? '<hr class="section-divider">' + renderAccounting(t, matches, customers) : ''}
+        ${(t.status === 'in_progress' || t.status === 'completed') ? '<hr class="section-divider">' + renderAccounting(t, matches, customers, tournamentPayouts) : ''}
 
         <div class="modal-actions">
           <button class="btn btn-outline" onclick="App.closeModalForce()">بستن</button>
@@ -980,10 +951,14 @@ const Tournaments = (function () {
     let payType = document.getElementById("entryPayType").value;
     let settlerName = Utils.getSettlerName();
 
-    await Utils.applyPayment(payerId, t.entryFee, payType);
+    let payResult = await Utils.applyPayment(payerId, t.entryFee, payType);
+    if (!payResult.success) {
+      App.toast(payResult.reason === "insufficient_wallet" ? "موجودی کیف‌پول کافی نیست" : "پرداخت ناموفق بود");
+      return;
+    }
 
     if (!t.entryFeeStatus) t.entryFeeStatus = {};
-    t.entryFeeStatus[participantId] = { collected: true, payerId, payType, settlerName, settledAt: new Date().toISOString() };
+    t.entryFeeStatus[participantId] = { collected: true, payType, settlerName, settledAt: new Date().toISOString() };
     await DB.put("tournaments", t);
 
     await DB.logActivity("دریافت حق ورود مسابقه", t.name + " — " + Utils.formatCurrency(t.entryFee));
@@ -1044,28 +1019,18 @@ const Tournaments = (function () {
     let customer = await DB.get("customers", payerId);
     if (!customer) { App.toast("پرداخت‌کننده نامعتبر است"); return; }
 
-    await Utils.applyPayment(payerId, total, payType);
+    let payResult = await Utils.applyPayment(payerId, total, payType);
+    if (!payResult.success) {
+      App.toast(payResult.reason === "insufficient_wallet" ? "موجودی کیف‌پول کافی نیست" : "پرداخت ناموفق بود");
+      return;
+    }
 
-    let settledAt = new Date().toISOString();
     match.settled = true;
     match.settlePayType = payType;
     match.settleAmount = total;
     match.settlerName = settlerName;
-    match.settledAt = settledAt;
+    match.settledAt = new Date().toISOString();
     await DB.put("matches", match);
-
-    await DB.add("blockPayments", {
-      customerId: payerId,
-      sessionId: null,
-      matchId: match.id,
-      deviceId: match.deviceId || null,
-      deviceType: "tournament",
-      blockIndex: null,
-      amount: total,
-      payType: payType,
-      settlerName: settlerName,
-      date: settledAt,
-    });
 
     let tournament = await DB.get("tournaments", match.tournamentId);
     await DB.logActivity("تسویه بازی مسابقه", (tournament ? tournament.name : '') + " — " + Utils.formatCurrency(total));
@@ -1083,9 +1048,31 @@ const Tournaments = (function () {
     let unsettled = matches.filter((m) => !m.settled && ((m.deviceCost || 0) > 0 || (m.items || []).length > 0));
     if (unsettled.length === 0) { App.toast("بازی تسویه‌نشده‌ای وجود ندارد"); return; }
 
-    if (!confirm("آیا " + unsettled.length + " بازی تسویه شود؟")) return;
+    App.openModal(`
+      <h2>تسویه همه بازی‌ها</h2>
+      <div class="list-row"><span class="row-label">تعداد بازی‌ها</span><span class="row-value">${unsettled.length}</span></div>
+      <div class="text-muted text-sm" style="margin-bottom:8px;">هزینه هر بازی از بازنده آن بازی دریافت می‌شود.</div>
+      <div class="form-group"><label>روش پرداخت (برای همه بازی‌ها)</label>
+        <select id="bulkSettlePayType"><option value="cash">نقدی</option><option value="card">کارتی</option><option value="wallet">کیف‌پول</option><option value="debt">بدهکاری</option></select>
+      </div>
+      <div class="modal-actions">
+        <button class="btn btn-success" onclick="Tournaments.confirmSettleAllMatches(${tournamentId})">تسویه</button>
+        <button class="btn btn-outline" onclick="App.closeModalForce()">انصراف</button>
+      </div>
+    `);
+  }
 
-    let settledCount = 0;
+  async function confirmSettleAllMatches(tournamentId) {
+    let t = await DB.get("tournaments", tournamentId);
+    if (!t) return;
+    let payType = document.getElementById("bulkSettlePayType")?.value || "cash";
+    let matches;
+    try { matches = await DB.getByIndex("matches", "by_tournament", tournamentId); } catch (e) { matches = (await DB.getAll("matches")).filter((m) => m.tournamentId === tournamentId); }
+
+    let unsettled = matches.filter((m) => !m.settled && ((m.deviceCost || 0) > 0 || (m.items || []).length > 0));
+    if (unsettled.length === 0) { App.toast("بازی تسویه‌نشده‌ای وجود ندارد"); return; }
+
+    let settledCount = 0, skippedCount = 0;
     for (let m of unsettled) {
       let totalItems = (m.items || []).reduce((s, i) => s + (i.price * i.qty), 0);
       let total = (m.deviceCost || 0) + totalItems;
@@ -1094,36 +1081,91 @@ const Tournaments = (function () {
       let loserId = m.winner ? (m.winner === m.playerA ? m.playerB : m.playerA) : (m.playerA || m.playerB);
       if (!loserId) continue;
 
-      await Utils.applyPayment(loserId, total, "cash");
-      let settledAt = new Date().toISOString();
+      let payResult = await Utils.applyPayment(loserId, total, payType);
+      if (!payResult.success) { skippedCount++; continue; }
       m.settled = true;
-      m.settlePayType = "cash";
+      m.settlePayType = payType;
       m.settleAmount = total;
       m.settlerName = "تسویه خودکار";
-      m.settledAt = settledAt;
+      m.settledAt = new Date().toISOString();
       await DB.put("matches", m);
-
-      await DB.add("blockPayments", {
-        customerId: loserId,
-        sessionId: null,
-        matchId: m.id,
-        deviceId: m.deviceId || null,
-        deviceType: "tournament",
-        blockIndex: null,
-        amount: total,
-        payType: "cash",
-        settlerName: "تسویه خودکار",
-        date: settledAt,
-      });
       settledCount++;
     }
 
-    await DB.logActivity("تسویه همه بازی‌ها", t.name + " — " + settledCount + " بازی");
-    App.toast("همه بازی‌ها تسویه شد");
+    await DB.logActivity("تسویه همه بازی‌ها", t.name + " — " + settledCount + " بازی | روش: " + payType);
+    App.closeModalForce();
+    App.toast(skippedCount > 0 ? (settledCount + " بازی تسویه شد، " + skippedCount + " بازی به‌دلیل کمبود موجودی کیف‌پول رد شد") : "همه بازی‌ها تسویه شد");
     manageTournament(tournamentId);
   }
 
-  function renderAccounting(tournament, matches, customers) {
+  async function payoutPrize(tournamentId, place) {
+    let t = await DB.get("tournaments", tournamentId);
+    if (!t) return;
+    let prize = (t.prizes || []).find((p) => p.place === place);
+    if (!prize) { App.toast("جایزه یافت نشد"); return; }
+    let existing = (await DB.getAll("prizePayouts")).find((p) => p.tournamentId === tournamentId && p.place === place);
+    if (existing) { App.toast("این جایزه قبلاً پرداخت شده است"); return; }
+
+    let participants = t.participants || [];
+    let customers = await DB.getAll("customers");
+    let customerOptions = participants.map((pid) => {
+      let c = customers.find((cu) => cu.id === pid);
+      let label = c ? ((c.firstName || '') + ' ' + (c.lastName || '')).trim() : '#' + pid;
+      return `<option value="${pid}">${Utils.escapeHtml(label)}</option>`;
+    }).join("");
+
+    App.openModal(`
+      <h2>پرداخت جایزه</h2>
+      <div class="list-row"><span class="row-label">جایگاه</span><span class="row-value">${Utils.escapeHtml(prize.label || ('جایگاه ' + prize.place))}</span></div>
+      <div class="list-row font-bold"><span class="row-label">مبلغ</span><span class="row-value amount">${Utils.formatCurrency(prize.amount)}</span></div>
+      <hr class="section-divider">
+      <div class="form-group"><label>برنده</label><select id="prizeWinnerId">${customerOptions}</select></div>
+      <div class="form-group"><label>نحوه پرداخت</label>
+        <select id="prizePayoutMethod"><option value="cash">نقد (از صندوق)</option><option value="card">کارتی</option><option value="wallet">افزودن به کیف‌پول</option></select>
+      </div>
+      <div class="modal-actions">
+        <button class="btn btn-success" onclick="Tournaments.confirmPayoutPrize(${tournamentId}, ${place})">پرداخت</button>
+        <button class="btn btn-outline" onclick="App.closeModalForce()">انصراف</button>
+      </div>
+    `);
+  }
+
+  async function confirmPayoutPrize(tournamentId, place) {
+    let t = await DB.get("tournaments", tournamentId);
+    if (!t) return;
+    let prize = (t.prizes || []).find((p) => p.place === place);
+    if (!prize) { App.toast("جایزه یافت نشد"); return; }
+    let existing = (await DB.getAll("prizePayouts")).find((p) => p.tournamentId === tournamentId && p.place === place);
+    if (existing) { App.toast("این جایزه قبلاً پرداخت شده است"); return; }
+
+    let winnerId = parseInt(document.getElementById("prizeWinnerId").value) || 0;
+    let method = document.getElementById("prizePayoutMethod").value;
+    if (!winnerId) { App.toast("برنده را انتخاب کنید"); return; }
+
+    // A cash/card payout is money leaving the till (like a purchase); crediting
+    // the wallet instead just moves it onto the customer's account, so it is
+    // recorded but doesn't reduce the day's cash reconciliation total.
+    if (method === "wallet") {
+      let customer = await DB.get("customers", winnerId);
+      if (!customer) { App.toast("مشتری یافت نشد"); return; }
+      customer.wallet = (customer.wallet || 0) + prize.amount;
+      await DB.put("customers", customer);
+    }
+
+    await DB.add("prizePayouts", {
+      tournamentId, place, customerId: winnerId,
+      amount: prize.amount, payType: method === "wallet" ? "wallet" : method,
+      date: new Date().toISOString(),
+    });
+
+    await DB.logActivity("پرداخت جایزه مسابقه", t.name + " — " + (prize.label || ('جایگاه ' + place)) + " — " + Utils.formatCurrency(prize.amount));
+    App.closeModalForce();
+    App.toast("جایزه پرداخت شد");
+    manageTournament(tournamentId);
+  }
+
+  function renderAccounting(tournament, matches, customers, prizePayouts) {
+    prizePayouts = prizePayouts || [];
     let participants = tournament.participants || [];
     let entryFee = tournament.entryFee || 0;
     let entryFeeStatus = tournament.entryFeeStatus || {};
@@ -1182,6 +1224,21 @@ const Tournaments = (function () {
       return s + (m.deviceCost || 0) + totalItems;
     }, 0);
 
+    let prizes = tournament.prizes || [];
+    let prizesHtml = prizes.filter((p) => (p.amount || 0) > 0).map((p) => {
+      let payout = prizePayouts.find((po) => po.place === p.place);
+      let winnerName = payout ? getParticipantName(payout.customerId, customers) : "";
+      return `<div class="list-row" style="align-items:center;">
+        <span class="row-label" style="flex:1;">${Utils.escapeHtml(p.label || ('جایگاه ' + p.place))}</span>
+        <span class="row-value" style="margin-left:8px;">${Utils.formatCurrency(p.amount)}</span>
+        ${payout
+          ? '<span class="status-badge status-free" style="font-size:11px;">پرداخت شده به ' + Utils.escapeHtml(winnerName) + ' ✓</span>'
+          : '<button class="btn btn-sm btn-success" onclick="Tournaments.payoutPrize(' + tournament.id + ', ' + p.place + ')">پرداخت جایزه ▶</button>'
+        }
+      </div>`;
+    }).join("");
+    let totalPrizePayouts = prizePayouts.reduce((s, p) => s + (p.amount || 0), 0);
+
     return `
       <div class="accounting-section" style="margin-top:16px;">
         <h3 style="margin-bottom:8px;">💰 حسابداری</h3>
@@ -1200,6 +1257,14 @@ const Tournaments = (function () {
 
         ${unsettledMatches.length > 0 && settledCount < unsettledMatches.length ? '<button class="btn btn-sm btn-success" onclick="Tournaments.settleAllMatches(' + tournament.id + ')" style="margin-bottom:12px;">تسویه همه بازی‌ها</button>' : ''}
 
+        ${prizesHtml ? `
+        <div style="margin-bottom:16px;">
+          <h4 style="margin-bottom:6px;font-size:13px;">جوایز</h4>
+          ${prizesHtml}
+          <div style="margin-top:6px;font-size:12px;color:var(--text-muted);">جمع پرداخت‌شده: ${Utils.formatCurrency(totalPrizePayouts)} (${prizePayouts.length}/${prizes.filter((p) => (p.amount || 0) > 0).length})</div>
+        </div>
+        ` : ''}
+
         <div class="list-row font-bold" style="margin-top:8px;">
           <span class="row-label">جمع درآمد حق ورود</span>
           <span class="row-value amount positive">${Utils.formatCurrency(totalEntryFees)}</span>
@@ -1208,9 +1273,15 @@ const Tournaments = (function () {
           <span class="row-label">جمع هزینه بازی‌ها</span>
           <span class="row-value amount">${Utils.formatCurrency(totalSettledMatchCosts)}</span>
         </div>
+        ${totalPrizePayouts > 0 ? `
+        <div class="list-row font-bold">
+          <span class="row-label">جمع پرداخت جوایز</span>
+          <span class="row-value amount">${Utils.formatCurrency(totalPrizePayouts)}</span>
+        </div>
+        ` : ''}
         <div class="list-row font-bold text-lg" style="border-top:2px solid var(--border);padding-top:8px;">
           <span class="row-label">خالص</span>
-          <span class="row-value amount ${totalEntryFees - totalSettledMatchCosts >= 0 ? 'positive' : 'negative'}">${Utils.formatCurrency(totalEntryFees - totalSettledMatchCosts)}</span>
+          <span class="row-value amount ${totalEntryFees - totalSettledMatchCosts - totalPrizePayouts >= 0 ? 'positive' : 'negative'}">${Utils.formatCurrency(totalEntryFees - totalSettledMatchCosts - totalPrizePayouts)}</span>
         </div>
       </div>
     `;
@@ -1322,6 +1393,9 @@ const Tournaments = (function () {
     settleMatch,
     confirmSettleMatch,
     settleAllMatches,
+    confirmSettleAllMatches,
+    payoutPrize,
+    confirmPayoutPrize,
     refresh,
   };
 })();
