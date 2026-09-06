@@ -124,29 +124,17 @@ const App = (function () {
     renderSidebar();
     switchTab("consoles");
 
-    // Freeze any business day(s) that already ended while the app was closed
-    // (single offline browser — this is the only chance to catch up). Never
-    // freezes the currently open day; see Reports.autoClosePastDays.
     Reports.autoClosePastDays();
 
     startDayCloseReminder();
   }
 
-  // Re-run the catch-up freeze whenever the tab/browser regains focus, so a
-  // business day that ended while the app was in the background (or the OS
-  // put the tab to sleep) gets frozen as soon as staff comes back to it,
-  // without needing to press anything.
   document.addEventListener("visibilitychange", () => {
     if (!document.hidden) {
       Reports.autoClosePastDays();
     }
   });
 
-  // ── Business-day close reminder (23:35 boundary) ─────────────────────────
-  // The business day ends at 23:35 (see Utils.getReportRange). This lightweight
-  // in-app reminder nudges staff a few minutes before, and again exactly at,
-  // the boundary so closing the register doesn't rely on staff memory. It fires
-  // at most once per marker per day (no browser push notifications needed).
   let dayCloseReminderState = { day: null, fired: {} };
   const DAY_CLOSE_MARKERS = [
     { h: 23, m: 25, msg: "۱۰ دقیقه تا پایان روز کاری (۲۳:۳۵) — لطفاً برای بستن صندوق آماده شوید." },
@@ -168,10 +156,11 @@ const App = (function () {
         if (hh === marker.h && mm === marker.m && !dayCloseReminderState.fired[key]) {
           dayCloseReminderState.fired[key] = true;
           toast(marker.msg);
+          if (marker.h === 23 && marker.m === 35) {
+            Backup.writeAutoBackup();
+          }
         }
       });
-      // Catch-up freeze on every tick as well, so the freeze happens even if
-      // the tab was backgrounded and visibilitychange didn't fire in time.
       Reports.autoClosePastDays(now);
     }
     tick();

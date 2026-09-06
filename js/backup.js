@@ -87,7 +87,6 @@ const Backup = (function () {
         XLSX.utils.book_append_sheet(wb, ws, "پرسنل");
       }
 
-      // Café orders (open orders + settled history), with items and payment type.
       if (data.cafeOrders && data.cafeOrders.length) {
         let customers = data.customers || [];
         let ws = XLSX.utils.json_to_sheet(data.cafeOrders.map((o) => {
@@ -102,7 +101,6 @@ const Backup = (function () {
         XLSX.utils.book_append_sheet(wb, ws, "سفارشات کافی‌شاپ");
       }
 
-      // Wallet charge history.
       if (data.walletCharges && data.walletCharges.length) {
         let customers = data.customers || [];
         let ws = XLSX.utils.json_to_sheet(data.walletCharges.map((c) => {
@@ -116,7 +114,6 @@ const Backup = (function () {
         XLSX.utils.book_append_sheet(wb, ws, "شارژ کیف‌پول");
       }
 
-      // Current cafe item inventory levels.
       if (data.cafeItems && data.cafeItems.length) {
         let ws = XLSX.utils.json_to_sheet(data.cafeItems.map((it) => ({
           "نام": it.name, "قیمت": it.price,
@@ -125,7 +122,6 @@ const Backup = (function () {
         XLSX.utils.book_append_sheet(wb, ws, "موجودی کافی‌شاپ");
       }
 
-      // Day-close summaries.
       if (data.dailySummaries && data.dailySummaries.length) {
         let ws = XLSX.utils.json_to_sheet(data.dailySummaries.map((s) => ({
           "تاریخ": s.date, "نقدی ورودی": s.cashIn, "کارتی ورودی": s.cardIn,
@@ -134,7 +130,6 @@ const Backup = (function () {
         XLSX.utils.book_append_sheet(wb, ws, "بستن روز");
       }
 
-      // Block/tournament settlements.
       if (data.blockPayments && data.blockPayments.length) {
         let customers = data.customers || [];
         let ws = XLSX.utils.json_to_sheet(data.blockPayments.map((bp) => {
@@ -149,7 +144,6 @@ const Backup = (function () {
         XLSX.utils.book_append_sheet(wb, ws, "تسویه بلوک/مسابقه");
       }
 
-      // Prize payouts.
       if (data.prizePayouts && data.prizePayouts.length) {
         let customers = data.customers || [];
         let tournaments = data.tournaments || [];
@@ -215,5 +209,22 @@ const Backup = (function () {
     event.target.value = "";
   }
 
-  return { render, exportExcel, exportJSON, triggerImport, importJSON };
+  async function writeAutoBackup() {
+    try {
+      let data = await DB.exportAll();
+      data._exportDate = new Date().toISOString();
+      data._version = 1;
+      let res = await fetch("/api/backup", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      });
+      if (!res.ok) throw new Error("backup http " + res.status);
+      await DB.logActivity("بک‌آپ خودکار", "ساعت ۲۳:۳۵");
+    } catch (e) {
+      console.error("auto backup failed", e);
+    }
+  }
+
+  return { render, exportExcel, exportJSON, triggerImport, importJSON, writeAutoBackup };
 })();
