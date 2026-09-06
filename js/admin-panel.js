@@ -53,6 +53,13 @@ const AdminPanel = (function () {
         <hr class="section-divider">
 
         <div class="report-section">
+          <h3>تنظیمات باشگاه مشتریان</h3>
+          <div id="clubRankConfig"></div>
+        </div>
+
+        <hr class="section-divider">
+
+        <div class="report-section">
           <h3>مدیریت دستگاه‌ها</h3>
           <h4 style="margin-bottom:8px">کنسول‌ها</h4>
           ${consoleDevices.map((d) => `
@@ -118,6 +125,7 @@ const AdminPanel = (function () {
 
     Inventory.render(document.getElementById("inventorySection"));
     Penalties.render(document.getElementById("penaltySection"));
+    renderClubConfig(document.getElementById("clubRankConfig"));
   }
 
   async function savePricing() {
@@ -224,10 +232,94 @@ const AdminPanel = (function () {
     refresh();
   }
 
+  async function renderClubConfig(el) {
+    let club = await DB.getSetting("customerClub", { categories: [], tierDiscounts: {} });
+    let categories = club.categories || [];
+    let tierDiscounts = club.tierDiscounts || {};
+
+    let html = categories.map((cat, ci) => {
+      let tiers = [];
+      for (let t = 0; t < (cat.tiers || 0); t++) {
+        let threshold = (cat.baseThreshold || 0) + t * (cat.thresholdStep || 0);
+        let key = cat.name + "_" + (t + 1);
+        let disc = tierDiscounts[key] || 0;
+        tiers.push(`
+          <tr>
+            <td>${cat.name} ${t + 1}</td>
+            <td>${Utils.formatCurrency(threshold)}</td>
+            <td><input type="number" class="club-disc-input" data-key="${key}" value="${disc}" min="0" max="100" style="width:70px"></td>
+          </tr>
+        `);
+      }
+      return `
+        <div style="margin-bottom:16px">
+          <div class="form-inline" style="align-items:flex-end;gap:8px;margin-bottom:8px">
+            <div class="form-group">
+              <label>نام دسته</label>
+              <input type="text" class="club-cat-name" data-ci="${ci}" value="${Utils.escapeHtml(cat.name)}">
+            </div>
+            <div class="form-group">
+              <label>تعداد درجه‌ها</label>
+              <input type="number" class="club-cat-tiers" data-ci="${ci}" value="${cat.tiers || 10}" min="1" max="50" style="width:70px">
+            </div>
+            <div class="form-group">
+              <label>آستانه پایه</label>
+              <input type="number" class="club-cat-base" data-ci="${ci}" value="${cat.baseThreshold || 0}" min="0" style="width:120px">
+            </div>
+            <div class="form-group">
+              <label>گام افزایش</label>
+              <input type="number" class="club-cat-step" data-ci="${ci}" value="${cat.thresholdStep || 0}" min="0" style="width:120px">
+            </div>
+            <div class="form-group">
+              <label>رنگ</label>
+              <input type="color" class="club-cat-color" data-ci="${ci}" value="${cat.color || '#999'}" style="width:40px;height:32px;padding:2px">
+            </div>
+          </div>
+          <table style="width:100%;font-size:0.85rem;border-collapse:collapse">
+            <thead><tr><th style="text-align:right;padding:4px 8px">درجه</th><th style="text-align:right;padding:4px 8px">آستانه</th><th style="text-align:right;padding:4px 8px">تخفیف %</th></tr></thead>
+            <tbody>${tiers.join("")}</tbody>
+          </table>
+        </div>
+      `;
+    }).join("");
+
+    el.innerHTML = html + `<button class="btn btn-primary mt-2" onclick="AdminPanel.saveCustomerClub()">ذخیره تنظیمات باشگاه</button>`;
+  }
+
+  async function saveCustomerClub() {
+    let club = await DB.getSetting("customerClub", { categories: [], tierDiscounts: {} });
+    let categories = club.categories || [];
+    let tierDiscounts = {};
+
+    document.querySelectorAll(".club-disc-input").forEach((el) => {
+      tierDiscounts[el.dataset.key] = parseInt(el.value) || 0;
+    });
+
+    let newCategories = categories.map((cat, ci) => {
+      let nameEl = document.querySelector(`.club-cat-name[data-ci="${ci}"]`);
+      let tiersEl = document.querySelector(`.club-cat-tiers[data-ci="${ci}"]`);
+      let baseEl = document.querySelector(`.club-cat-base[data-ci="${ci}"]`);
+      let stepEl = document.querySelector(`.club-cat-step[data-ci="${ci}"]`);
+      let colorEl = document.querySelector(`.club-cat-color[data-ci="${ci}"]`);
+      return {
+        name: nameEl ? nameEl.value.trim() || cat.name : cat.name,
+        color: colorEl ? colorEl.value : cat.color,
+        tiers: parseInt(tiersEl ? tiersEl.value : cat.tiers) || 10,
+        baseThreshold: parseInt(baseEl ? baseEl.value : cat.baseThreshold) || 0,
+        thresholdStep: parseInt(stepEl ? stepEl.value : cat.thresholdStep) || 0,
+      };
+    });
+
+    await DB.setSetting("customerClub", { categories: newCategories, tierDiscounts });
+    await DB.logActivity("ذخیره تنظیمات باشگاه", "تعداد دسته‌ها: " + newCategories.length);
+    App.toast("تنظیمات باشگاه ذخیره شد");
+    refresh();
+  }
+
   function refresh() {
     let el = document.getElementById("tab-adminPanel");
     if (el && el.classList.contains("active")) render(el);
   }
 
-  return { render, savePricing, addDevice, editDevice, saveDevice, deleteDevice, addUser, saveUser, refresh };
+  return { render, savePricing, saveCustomerClub, addDevice, editDevice, saveDevice, deleteDevice, addUser, saveUser, refresh };
 })();

@@ -19,6 +19,7 @@ const App = (function () {
     {
       id: "customers", label: "مشتریان", items: [
         { tab: "customers", icon: "👤", label: "شناسه‌ها" },
+        { tab: "customerClub", icon: "🏅", label: "باشگاه مشتریان" },
         { tab: "debts", icon: "💰", label: "بدهی‌ها" },
       ],
     },
@@ -214,6 +215,9 @@ const App = (function () {
         break;
       case "customers":
         Customers.render(document.getElementById("tab-customers"));
+        break;
+      case "customerClub":
+        CustomerClub.render(document.getElementById("tab-customerClub"));
         break;
       case "debts":
         Debts.render(document.getElementById("tab-debts"));

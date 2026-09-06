@@ -1631,3 +1631,185 @@ canvas { width: 100% !important; max-height: 300px; }
   .bracket-match-box { min-width: 110px; padding: 6px 8px; font-size: 11px; }
   .bracket-connector-col { width: 24px; }
 }
+
+/* Customer Club */
+.club-summary {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+}
+.club-summary .summary-item {
+  flex: 1;
+  min-width: 120px;
+  background: var(--bg-glass);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 12px;
+  text-align: center;
+}
+.club-summary .summary-label {
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+  margin-bottom: 4px;
+}
+.club-summary .summary-value {
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: var(--text);
+}
+.club-dist {
+  margin-bottom: 16px;
+  padding: 12px;
+  background: var(--bg-glass);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
+.dist-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.dist-label {
+  min-width: 70px;
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+  text-align: left;
+}
+.dist-track {
+  flex: 1;
+  height: 8px;
+  background: var(--bg-glass-heavy);
+  border-radius: 4px;
+  overflow: hidden;
+}
+.dist-fill {
+  height: 100%;
+  background: var(--accent);
+  border-radius: 4px;
+  transition: width 0.3s ease;
+}
+.dist-count {
+  min-width: 30px;
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+  text-align: right;
+}
+.club-controls {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+}
+.club-controls input,
+.club-controls select {
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-glass);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 0.9rem;
+}
+.club-controls input {
+  flex: 1;
+  min-width: 150px;
+}
+.club-controls select {
+  min-width: 120px;
+}
+.club-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 12px;
+}
+.club-card {
+  background: var(--bg-glass);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 16px;
+  cursor: pointer;
+  transition: all var(--duration-sm) var(--ease);
+}
+.club-card:hover {
+  border-color: var(--accent);
+  box-shadow: 0 0 12px var(--accent-glow);
+  transform: translateY(-2px);
+}
+.club-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+.club-card-name {
+  font-weight: 600;
+  font-size: 1rem;
+  color: var(--text);
+}
+.club-card-id {
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+  margin-inline-start: 6px;
+}
+.rank-badge {
+  display: inline-block;
+  padding: 2px 10px;
+  border-radius: 12px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.rank-badge.rank-none {
+  background: var(--bg-glass-heavy);
+  color: var(--text-secondary);
+}
+.rank-badge.rank-sm {
+  font-size: 0.7rem;
+  padding: 1px 6px;
+}
+.club-card-interests {
+  margin-bottom: 8px;
+}
+.interest-chip {
+  display: inline-block;
+  padding: 2px 8px;
+  margin-inline-end: 4px;
+  background: var(--bg-glass-heavy);
+  border-radius: 10px;
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+}
+.interest-chip.interest-empty {
+  color: var(--text-secondary);
+  opacity: 0.5;
+}
+.club-card-stats {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+.club-stat {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  flex: 1;
+}
+.club-stat-value {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--text);
+}
+.club-stat-label {
+  font-size: 0.7rem;
+  color: var(--text-secondary);
+}
+.club-card-info {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+}

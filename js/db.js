@@ -239,6 +239,17 @@ const DB = (function () {
         roundingUnit: 1000,
       });
     }
+    let customerClub = await getSetting("customerClub");
+    if (!customerClub) {
+      await setSetting("customerClub", {
+        categories: [
+          { name: "برنزی", color: "#cd7f32", tiers: 10, baseThreshold: 0, thresholdStep: 100000 },
+          { name: "نقره‌ای", color: "#94a3b8", tiers: 10, baseThreshold: 1000000, thresholdStep: 200000 },
+          { name: "طلایی", color: "#f59e0b", tiers: 10, baseThreshold: 3000000, thresholdStep: 500000 },
+        ],
+        tierDiscounts: {},
+      });
+    }
     let devices = await getAll("devices");
     if (devices.length === 0) {
       for (let i = 1; i <= 4; i++) {

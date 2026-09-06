@@ -376,7 +376,7 @@ const Consoles = (function () {
     let discount = 0;
     if (session.ids && session.ids.length > 0) {
       let mainCustomer = await DB.get("customers", session.ids[0]);
-      if (mainCustomer && mainCustomer.discount) discount = Math.round(total * mainCustomer.discount / 100);
+      if (mainCustomer) discount = Math.round(total * await Utils.getEffectiveDiscount(mainCustomer) / 100);
     }
 
     let customers = await DB.getAll("customers");
@@ -431,7 +431,7 @@ const Consoles = (function () {
       let discount = 0;
       if (session.ids && session.ids.length > 0) {
         let mainCustomer = await DB.get("customers", session.ids[0]);
-        if (mainCustomer && mainCustomer.discount) discount = Math.round(gross * mainCustomer.discount / 100);
+        if (mainCustomer) discount = Math.round(gross * await Utils.getEffectiveDiscount(mainCustomer) / 100);
       }
       // Floor at 0 so discount/credit items can never "credit" the wallet.
       let finalAmount = Math.max(0, gross - discount);

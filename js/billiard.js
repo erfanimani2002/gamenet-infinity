@@ -294,7 +294,7 @@ const Billiard = (function () {
     let discount = 0;
     if (session.ids && session.ids.length > 0) {
       let mc = await DB.get("customers", session.ids[0]);
-      if (mc && mc.discount) discount = Math.round(total * mc.discount / 100);
+      if (mc) discount = Math.round(total * await Utils.getEffectiveDiscount(mc) / 100);
     }
 
     let customers = await DB.getAll("customers");
@@ -344,7 +344,7 @@ const Billiard = (function () {
       let discount = 0;
       if (session.ids && session.ids.length > 0) {
         let mc = await DB.get("customers", session.ids[0]);
-        if (mc && mc.discount) discount = Math.round(gross * mc.discount / 100);
+        if (mc) discount = Math.round(gross * await Utils.getEffectiveDiscount(mc) / 100);
       }
       let finalAmount = Math.max(0, gross - discount);
 

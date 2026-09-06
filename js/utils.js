@@ -283,6 +283,30 @@ const Utils = (function () {
     return jalaliWeekdays[(jsDay + 1) % 7];
   }
 
+  async function getEffectiveDiscount(customer) {
+    if (!customer) return 0;
+    let manualDiscount = customer.discount || 0;
+    let clubSettings = await DB.getSetting("customerClub", { categories: [], tierDiscounts: {} });
+    let categories = clubSettings.categories || [];
+    let tierDiscounts = clubSettings.tierDiscounts || {};
+    let totalPaid = customer.totalPaid || 0;
+    let bestRank = null;
+    for (let cat of categories) {
+      for (let t = 0; t < (cat.tiers || 0); t++) {
+        let threshold = (cat.baseThreshold || 0) + t * (cat.thresholdStep || 0);
+        if (totalPaid >= threshold) {
+          bestRank = { category: cat.name, tier: t + 1 };
+        }
+      }
+    }
+    let rankDiscount = 0;
+    if (bestRank) {
+      let key = bestRank.category + "_" + bestRank.tier;
+      rankDiscount = tierDiscounts[key] || 0;
+    }
+    return Math.max(manualDiscount, rankDiscount);
+  }
+
   return {
     getReportRange, getCurrentReportRange, getBusinessDayKey, roundPrice, generateId,
     formatCurrency, formatCurrencyShort, calculateTimeBlocksPrice,
@@ -290,5 +314,6 @@ const Utils = (function () {
     isInRange, escapeHtml, renderSelectLabel,
     applyPayment, computePaymentUpdate, guardDoubleClick, getSettlerOptions, renderSettlerSelect, getSettlerName, getCustomerDisplayId,
     getJalaliWeekday, resolveTransferRate, renderPayerSelect, filterPayerSelect,
+    getEffectiveDiscount,
   };
 })();
