@@ -191,10 +191,11 @@ const DB = (function () {
     });
   }
 
-  // Runs several store writes (put/add) inside a single IndexedDB transaction so
-  // they either all succeed or all fail together. `ops` is an array of
-  // { store, type: "put"|"add", data } objects. Returns an array of the
-  // resulting keys, in the same order as `ops`.
+  // Runs several store writes (put/add/remove) inside a single IndexedDB transaction
+  // so they either all succeed or all fail together. `ops` is an array of
+  // { store, type: "put"|"add"|"remove", data } objects. For "remove", `data` is the
+  // key to delete rather than an object. Returns an array of the resulting keys/results,
+  // in the same order as `ops`.
   async function runAtomic(ops) {
     await open();
     let storeNames = [...new Set(ops.map((o) => o.store))];
@@ -205,7 +206,14 @@ const DB = (function () {
       tx.oncomplete = () => resolve(results);
       ops.forEach((op, i) => {
         let store = tx.objectStore(op.store);
-        let req = op.type === "add" ? store.add(op.data) : store.put(op.data);
+        let req;
+        if (op.type === "add") {
+          req = store.add(op.data);
+        } else if (op.type === "remove") {
+          req = store.delete(op.data);
+        } else {
+          req = store.put(op.data);
+        }
         req.onsuccess = () => { results[i] = req.result; };
       });
     });

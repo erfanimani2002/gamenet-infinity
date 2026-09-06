@@ -351,7 +351,7 @@ const Billiard = (function () {
       let customer = await DB.get("customers", payerId);
       let payResult = Utils.computePaymentUpdate(customer, finalAmount, payType);
       if (!payResult.success) {
-        App.toast(payResult.reason === "insufficient_wallet" ? "موجودی کیف‌پول کافی نیست" : "پرداخت ناموفق بود");
+        App.toast("پرداخت ناموفق بود");
         return { success: false };
       }
 
@@ -371,11 +371,12 @@ const Billiard = (function () {
       session.status = "settled"; session.settledAt = new Date().toISOString(); session.settlePayType = payResult.payType; session.payBreakdown = payResult.payBreakdown; session.settleAmount = finalAmount; session.discount = discount || 0; session.settleBreakdown = byDevice; session.settlerName = settlerName; session.settlePayerId = payerId;
       session.timeBlocks.forEach((b) => { b.settled = true; });
 
+      let device = await DB.get("devices", deviceId);
       await DB.runAtomic([
         { store: "customers", type: "put", data: payResult.customer },
         { store: "sessions", type: "put", data: session },
+        { store: "devices", type: "put", data: { ...device, status: "free" } },
       ]);
-      await DB.put("devices", { ...await DB.get("devices", deviceId), status: "free" });
       await DB.logActivity("تسویه کل بیلیارد", "سشن #" + session.id + " | " + Utils.formatCurrency(finalAmount) + " | " + payResult.payType + " | " + settlerName);
       App.stopTimer("timer-billiard-" + deviceId); App.closeModalForce(); App.toast("تسویه شد"); refresh();
       return { success: true };
@@ -510,8 +511,11 @@ const Billiard = (function () {
     }
 
     App.stopTimer("timer-billiard-" + deviceId);
-    await DB.remove("sessions", session.id);
-    await DB.put("devices", { ...await DB.get("devices", deviceId), status: "free" });
+    let device = await DB.get("devices", deviceId);
+    await DB.runAtomic([
+      { store: "sessions", type: "remove", data: session.id },
+      { store: "devices", type: "put", data: { ...device, status: "free" } },
+    ]);
     await DB.logActivity("لغو سشن بیلیارد", "سشن #" + session.id + " حذف شد");
     App.toast("سشن لغو شد");
     refresh();

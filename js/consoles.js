@@ -439,7 +439,7 @@ const Consoles = (function () {
       let customer = await DB.get("customers", payerId);
       let payResult = Utils.computePaymentUpdate(customer, finalAmount, payType);
       if (!payResult.success) {
-        App.toast(payResult.reason === "insufficient_wallet" ? "موجودی کیف‌پول کافی نیست" : "پرداخت ناموفق بود");
+        App.toast("پرداخت ناموفق بود");
         return { success: false };
       }
 
@@ -470,11 +470,12 @@ const Consoles = (function () {
       session.settlePayerId = payerId;
       session.timeBlocks.forEach((b) => { b.settled = true; });
 
+      let device = await DB.get("devices", deviceId);
       await DB.runAtomic([
         { store: "customers", type: "put", data: payResult.customer },
         { store: "sessions", type: "put", data: session },
+        { store: "devices", type: "put", data: { ...device, status: "free" } },
       ]);
-      await DB.put("devices", { ...await DB.get("devices", deviceId), status: "free" });
       await DB.logActivity("تسویه کل سشن کنسول", "سشن #" + session.id + " | مبلغ: " + Utils.formatCurrency(finalAmount) + " | " + payResult.payType + " | " + settlerName);
       App.stopTimer("timer-" + deviceId);
       App.closeModalForce();
@@ -658,8 +659,11 @@ const Consoles = (function () {
     }
 
     App.stopTimer("timer-" + deviceId);
-    await DB.remove("sessions", session.id);
-    await DB.put("devices", { ...await DB.get("devices", deviceId), status: "free" });
+    let device = await DB.get("devices", deviceId);
+    await DB.runAtomic([
+      { store: "sessions", type: "remove", data: session.id },
+      { store: "devices", type: "put", data: { ...device, status: "free" } },
+    ]);
     await DB.logActivity("لغو سشن کنسول", "سشن #" + session.id + " حذف شد");
     App.toast("سشن لغو شد");
     refresh();

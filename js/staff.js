@@ -72,31 +72,6 @@ const Staff = (function () {
 
   async function showStaffDetail(staffId) {
     let staff = await DB.get("staff", staffId);
-    let today = new Date();
-    let jalaliToday = Jalali.getTodayJalali();
-
-    let totalMonthlyHours = 0;
-    let monthlyShifts = (staff.shifts || []).filter((s) => {
-      let d = new Date(s.start);
-      let j = Jalali.gregorianToJalali(d.getFullYear(), d.getMonth() + 1, d.getDate());
-      return j.year === jalaliToday.year && j.month === jalaliToday.month;
-    });
-    monthlyShifts.forEach((s) => {
-      if (s.end) totalMonthlyHours += (new Date(s.end) - new Date(s.start)) / 3600000;
-    });
-
-    let monthlyConsumption = (staff.consumption || []).filter((c) => {
-      let d = new Date(c.date);
-      let j = Jalali.gregorianToJalali(d.getFullYear(), d.getMonth() + 1, d.getDate());
-      return j.year === jalaliToday.year && j.month === jalaliToday.month;
-    });
-
-    let consumptionByType = {};
-    monthlyConsumption.forEach((c) => {
-      if (!consumptionByType[c.name]) consumptionByType[c.name] = { qty: 0, total: 0 };
-      consumptionByType[c.name].qty += c.qty;
-      consumptionByType[c.name].total += c.price * c.qty;
-    });
 
     App.openModal(`
       <h2>${Utils.escapeHtml(staff.name)}</h2>

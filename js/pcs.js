@@ -205,7 +205,7 @@ const PCs = (function () {
       let customer = await DB.get("customers", payerId);
       let payResult = Utils.computePaymentUpdate(customer, total, payType);
       if (!payResult.success) {
-        App.toast(payResult.reason === "insufficient_wallet" ? "موجودی کیف‌پول کافی نیست" : "پرداخت ناموفق بود");
+        App.toast("پرداخت ناموفق بود");
         return { success: false };
       }
 
@@ -218,11 +218,12 @@ const PCs = (function () {
       session.settlerName = settlerName;
       session.settlePayerId = payerId;
 
+      let device = await DB.get("devices", deviceId);
       await DB.runAtomic([
         { store: "customers", type: "put", data: payResult.customer },
         { store: "sessions", type: "put", data: session },
+        { store: "devices", type: "put", data: { ...device, status: "free" } },
       ]);
-      await DB.put("devices", { ...await DB.get("devices", deviceId), status: "free" });
       await DB.logActivity("خاموش + تسویه پی‌سی", "سشن #" + session.id + " | بازی: " + Utils.formatCurrency(gameAmount) + " | آیتم: " + Utils.formatCurrency(totalItems) + " | " + payType + " | " + settlerName);
       App.closeModalForce();
       App.toast("پی‌سی خاموش و تسویه شد");
