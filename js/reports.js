@@ -460,6 +460,70 @@ const Reports = (function () {
     App.toast("روز " + key + " بسته شد");
   }
 
+  // Freezes a single business day's SYSTEM totals into dailySummaries without
+  // any staff action. Only ever called for a range whose end has already
+  // passed (range.end <= now) — the currently open day must never be frozen.
+  // If a row already exists (manual closeDay, a prior auto-freeze, or a
+  // reconciliation in progress), its recon fields (cashCounted, cardReceived,
+  // diff*, closedAt, reconConfirmedAt, autoClosed*) are preserved untouched;
+  // we only ever add the cashIn/cardIn/cashOut/cardOut fields on top when
+  // they are missing, we never overwrite an existing frozen/reconciled row.
+  async function freezeBusinessDay(range) {
+    let now = new Date();
+    if (range.end > now) return null; // still open — never freeze
+
+    let key = Utils.getBusinessDayKey(range);
+    let existing = await DB.get("dailySummaries", key);
+    if (existing && existing.cashIn != null && existing.cardIn != null) {
+      // Already frozen (manually via closeDay or previously auto-closed).
+      return existing;
+    }
+
+    let totals = await calculateDailyTotals(range);
+    let daySummary = Object.assign({}, existing, {
+      date: key,
+      cashIn: totals.totalCashIn,
+      cardIn: totals.totalCardIn,
+      cashOut: totals.totalCashOut,
+      cardOut: totals.totalCardOut,
+      autoClosed: true,
+      autoClosedAt: now.toISOString(),
+    });
+    await DB.put("dailySummaries", daySummary);
+    return daySummary;
+  }
+
+  // Catch-up sweep: walks back 31 calendar days from `now` and freezes every
+  // business day whose range has already ended but has no frozen totals yet.
+  // Safe to call repeatedly (on login, on tab focus, on every reminder tick) —
+  // freezeBusinessDay is idempotent and never re-freezes or wipes a row that
+  // already has totals/recon data. This is what makes the freeze work even
+  // when the app was closed across one or more 23:35 boundaries.
+  async function autoClosePastDays(now) {
+    now = now instanceof Date ? now : new Date();
+
+    for (let i = 0; i <= 31; i++) {
+      let day = new Date(now);
+      day.setDate(day.getDate() - i);
+      day.setHours(12, 0, 0, 0);
+      let range = Utils.getReportRange(day);
+      if (range.end <= now) {
+        await freezeBusinessDay(range);
+      }
+    }
+
+    // Also cover the business day that most recently ended relative to `now`,
+    // in case its calendar-noon range wasn't already hit by the loop above
+    // (e.g. right after 23:35 but before the next calendar day's noon).
+    let currentOpenStart = Utils.getReportRange(now).start;
+    if (currentOpenStart <= now) {
+      let justEnded = Utils.getReportRange(new Date(currentOpenStart.getTime() - 1));
+      if (justEnded.end <= now) {
+        await freezeBusinessDay(justEnded);
+      }
+    }
+  }
+
   async function showFullTransactions() {
     let range = Utils.getReportRange();
     let sessions = await DB.getAll("sessions");
@@ -903,5 +967,5 @@ const Reports = (function () {
     App.toast("اکسل دانلود شد");
   }
 
-  return { renderDaily, renderInstant, renderMonthly, loadMonthlyReport, showFullTransactions, exportDailyExcel, exportMonthlyExcel, closeDay, editTransaction, saveEditTransaction, deleteTransaction, reversePayment, calculateDailyTotals };
+  return { renderDaily, renderInstant, renderMonthly, loadMonthlyReport, showFullTransactions, exportDailyExcel, exportMonthlyExcel, closeDay, editTransaction, saveEditTransaction, deleteTransaction, reversePayment, calculateDailyTotals, freezeBusinessDay, autoClosePastDays };
 })();
