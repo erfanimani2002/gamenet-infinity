@@ -156,15 +156,15 @@ const App = (function () {
         if (hh === marker.h && mm === marker.m && !dayCloseReminderState.fired[key]) {
           dayCloseReminderState.fired[key] = true;
           toast(marker.msg);
-          if (marker.h === 23 && marker.m === 35) {
-            Backup.writeAutoBackup();
-          }
         }
       });
       Reports.autoClosePastDays(now);
     }
     tick();
     setInterval(tick, 30000);
+
+    Backup.writeAutoBackup();
+    setInterval(() => Backup.writeAutoBackup(), 10 * 60 * 1000);
   }
 
   async function doLogout() {
