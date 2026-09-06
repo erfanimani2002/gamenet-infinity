@@ -231,16 +231,6 @@ const Reports = (function () {
           </div>
         </div>
 
-        <div class="form-inline">
-          <div class="form-group"><label>مبلغ شمارش‌شده صندوق</label><input type="number" id="cashCounted" placeholder="0" min="0"></div>
-          <div class="form-group"><label>مبلغ کارتخوان</label><input type="number" id="cardReceived" placeholder="0" min="0"></div>
-        </div>
-        <div class="text-muted text-sm" style="margin-top:4px">توجه: خریدهای پاسارگاد در جمع کارتخوان (POS) لحاظ نشده‌اند؛ کارتخوان فقط دریافتی‌های کارتی مشتریان است.</div>
-        <div id="reconciliationResult" style="margin-top:8px">
-          <div class="list-row"><span class="row-label">اختلاف نقدی</span><span class="row-value" id="diffCash">-</span></div>
-          <div class="list-row"><span class="row-label">اختلاف کارتخوان</span><span class="row-value" id="diffCard">-</span></div>
-        </div>
-
         <hr class="section-divider">
         <h3>فروش / عملیات</h3>
         ${areasHtml || '<div class="text-muted text-sm">فروش/عملیاتی ثبت نشده</div>'}
@@ -267,25 +257,10 @@ const Reports = (function () {
         <div class="flex-gap">
           <button class="btn btn-primary" onclick="Reports.exportDailyExcel()">خروجی اکسل</button>
           <button class="btn btn-outline" onclick="Reports.showFullTransactions()">لیست تراکنش‌ها</button>
-          <button class="btn btn-success" onclick="Reports.closeDay()">بستن روز</button>
         </div>
       </div>
     `;
     el.innerHTML = html;
-
-    document.getElementById("cashCounted").addEventListener("input", () => calcRecon(totalCashIn - totalCashOut, totalCardIn));
-    document.getElementById("cardReceived").addEventListener("input", () => calcRecon(totalCashIn - totalCashOut, totalCardIn));
-  }
-
-  function calcRecon(systemCash, systemCard) {
-    let cashCounted = parseInt(document.getElementById("cashCounted")?.value) || 0;
-    let cardReceived = parseInt(document.getElementById("cardReceived")?.value) || 0;
-    let diffCash = cashCounted - systemCash;
-    let diffCard = cardReceived - systemCard;
-    let dc = document.getElementById("diffCash");
-    let dcd = document.getElementById("diffCard");
-    if (dc) { dc.textContent = Utils.formatCurrency(diffCash); dc.className = "row-value " + (diffCash !== 0 ? "amount negative" : "amount positive"); }
-    if (dcd) { dcd.textContent = Utils.formatCurrency(diffCard); dcd.className = "row-value " + (diffCard !== 0 ? "amount negative" : "amount positive"); }
   }
 
   // The instant report is just the daily report's same business-day window,
@@ -359,6 +334,7 @@ const Reports = (function () {
 
     let dayData = {};
     let dayKeys = {};
+    let dayRanges = {};
     for (let d = 0; d < monthDays; d++) {
       // Business day boundaries are [calendarDay-1 23:35, calendarDay 23:35), the
       // same window Utils.getReportRange uses for "today" — computed here by
@@ -368,10 +344,13 @@ const Reports = (function () {
       let dayRange = Utils.getReportRange(noon);
       let totals = await calculateDailyTotals(dayRange, preloaded);
       dayData[d + 1] = totals.totalCashIn + totals.totalCardIn;
-      // The saved dailySummaries key (if this day was ever closed) is the
-      // business-day key of that same range — same derivation closeDay uses.
+      // The saved dailySummaries key (if this day was ever frozen/reconciled)
+      // is the business-day key of that same range — same derivation
+      // freezeBusinessDay uses.
       dayKeys[d + 1] = Utils.getBusinessDayKey(dayRange);
+      dayRanges[d + 1] = dayRange;
     }
+    let now = new Date();
 
     let monthTotal = Object.values(dayData).reduce((s, v) => s + v, 0);
     let maxTotal = Math.max(...Object.values(dayData), 1);
@@ -399,72 +378,34 @@ const Reports = (function () {
         ${Object.entries(dayData).map(([day, total]) => {
           let dayDate = new Date(firstDay); dayDate.setDate(dayDate.getDate() + parseInt(day) - 1);
           let weekday = Utils.getJalaliWeekday(dayDate);
-          let summary = dailySummaries.find((s) => s.date === dayKeys[day]);
-          // Drawer counts/diffs are only present once a day has actually been
-          // closed (closeDay persists cashCounted/cardReceived/diffCash/diffCard);
-          // older summaries saved before that field was added simply omit it.
-          let drawerHtml = summary && summary.cashCounted != null
-            ? `<span class="text-muted text-sm" style="margin-right:8px">شمارش: ${Utils.formatCurrency(summary.cashCounted)} | کارتخوان: ${Utils.formatCurrency(summary.cardReceived || 0)} | اختلاف نقدی: ${Utils.formatCurrency(summary.diffCash || 0)}</span>`
-            : "";
-          return `<div class="list-row"><span class="row-label">روز ${day} (${weekday})</span>${drawerHtml}<span class="row-value">${Utils.formatCurrency(total)}</span></div>`;
+          let key = dayKeys[day];
+          let range = dayRanges[day];
+          let summary = dailySummaries.find((s) => s.date === key);
+
+          let statusHtml;
+          if (range.end > now) {
+            // Still the open/current business day — nothing to reconcile yet.
+            statusHtml = `<span class="text-muted text-sm" style="margin-right:8px">باز</span>`;
+          } else if (!summary || summary.cashCounted == null) {
+            // Day has ended but staff hasn't confirmed the till yet.
+            statusHtml = `<button class="btn btn-sm btn-outline" style="margin-right:8px" onclick="Reports.showDayRecon('${key}', '${range.start.toISOString()}', '${range.end.toISOString()}')">تطبیق صندوق</button>`;
+          } else {
+            statusHtml = `<span class="text-muted text-sm" style="margin-right:8px">شمارش: ${Utils.formatCurrency(summary.cashCounted)} | کارتخوان: ${Utils.formatCurrency(summary.cardReceived || 0)} | اختلاف نقدی: ${Utils.formatCurrency(summary.diffCash || 0)} | اختلاف کارت: ${Utils.formatCurrency(summary.diffCard || 0)}</span>
+              <button class="btn btn-sm btn-outline" style="margin-right:8px" onclick="Reports.showDayRecon('${key}', '${range.start.toISOString()}', '${range.end.toISOString()}')">ویرایش تطبیق</button>`;
+          }
+
+          return `<div class="list-row"><span class="row-label">روز ${day} (${weekday})</span>${statusHtml}<span class="row-value">${Utils.formatCurrency(total)}</span></div>`;
         }).join("")}
       </div>
       <button class="btn btn-primary" onclick="Reports.exportMonthlyExcel()">خروجی اکسل</button>
     `;
   }
 
-  // Closes the business day currently shown by the daily report (renderDaily
-  // always uses Utils.getReportRange(), the [previous 23:35, this 23:35) window).
-  // The button carries no baked-in totals: it recomputes them here and reads
-  // #cashCounted/#cardReceived live, so a report left open across the 23:35
-  // boundary can't close using stale numbers or the wrong day key.
-  async function closeDay() {
-    let range = Utils.getReportRange();
-    let d = await calculateDailyTotals(range);
-    let { totalCashIn, totalCardIn, totalCashOut, totalCardOut } = d;
-
-    let cashCountedInput = document.getElementById("cashCounted");
-    let cardReceivedInput = document.getElementById("cardReceived");
-    let cashCountedRaw = cashCountedInput ? cashCountedInput.value.trim() : "";
-    let cardReceivedRaw = cardReceivedInput ? cardReceivedInput.value.trim() : "";
-    if (!cashCountedRaw && !cardReceivedRaw) {
-      App.toast("قبل از بستن روز، مبلغ شمارش‌شده صندوق یا کارتخوان را وارد کنید");
-      return;
-    }
-    let cashCounted = parseInt(cashCountedRaw) || 0;
-    let cardReceived = parseInt(cardReceivedRaw) || 0;
-    let netCash = totalCashIn - totalCashOut;
-    let diffCash = cashCounted - netCash;
-    let diffCard = cardReceived - totalCardIn;
-
-    // The business-day key is derived from the END of the report range (the
-    // 23:35 instant that closes it) — not from today's calendar date — so
-    // closing at 23:40 correctly files under the NEXT business day, which is
-    // already the day the on-screen report describes.
-    let key = Utils.getBusinessDayKey(range);
-
-    let existing = await DB.get("dailySummaries", key);
-    let confirmMsg = existing
-      ? "برای روز " + key + " قبلاً گزارش بستن ثبت شده. آیا از رونویسی آن مطمئن هستید؟"
-      : "آیا از بستن روز " + key + " مطمئن هستید؟ اطلاعات در گزارش ماهانه ثبت خواهد شد.";
-    if (!confirm(confirmMsg)) return;
-
-    let daySummary = {
-      date: key,
-      cashIn: totalCashIn, cardIn: totalCardIn, cashOut: totalCashOut, cardOut: totalCardOut,
-      cashCounted, cardReceived, diffCash, diffCard,
-      closedAt: new Date().toISOString(),
-    };
-    await DB.put("dailySummaries", daySummary);
-    await DB.logActivity("بستن روز", "تاریخ: " + key + " | نقدی: " + Utils.formatCurrency(totalCashIn) + " | کارتی: " + Utils.formatCurrency(totalCardIn) + " | شمارش‌شده نقدی: " + Utils.formatCurrency(cashCounted) + " | کارتخوان: " + Utils.formatCurrency(cardReceived));
-    App.toast("روز " + key + " بسته شد");
-  }
-
   // Freezes a single business day's SYSTEM totals into dailySummaries without
   // any staff action. Only ever called for a range whose end has already
   // passed (range.end <= now) — the currently open day must never be frozen.
-  // If a row already exists (manual closeDay, a prior auto-freeze, or a
-  // reconciliation in progress), its recon fields (cashCounted, cardReceived,
+  // If a row already exists (a prior auto-freeze, an on-demand freeze from
+  // showDayRecon, or a confirmed reconciliation), its recon fields (cashCounted, cardReceived,
   // diff*, closedAt, reconConfirmedAt, autoClosed*) are preserved untouched;
   // we only ever add the cashIn/cardIn/cashOut/cardOut fields on top when
   // they are missing, we never overwrite an existing frozen/reconciled row.
@@ -475,7 +416,7 @@ const Reports = (function () {
     let key = Utils.getBusinessDayKey(range);
     let existing = await DB.get("dailySummaries", key);
     if (existing && existing.cashIn != null && existing.cardIn != null) {
-      // Already frozen (manually via closeDay or previously auto-closed).
+      // Already frozen (previously auto-closed or frozen on-demand for recon).
       return existing;
     }
 
@@ -522,6 +463,106 @@ const Reports = (function () {
         await freezeBusinessDay(justEnded);
       }
     }
+  }
+
+  // Opens the monthly till-confirmation modal for one ended business day.
+  // `startISO`/`endISO` are that day's getReportRange bounds (passed in from
+  // loadMonthlyReport, since a business-day key alone can't be reversed back
+  // into a range). If the day was never frozen yet (e.g. staff jumps straight
+  // to confirming without waiting for the auto-close tick), it's frozen here
+  // first via freezeBusinessDay — the modal always displays those frozen
+  // system numbers, never a live recompute, and confirming never touches them.
+  async function showDayRecon(key, startISO, endISO) {
+    let range = { start: new Date(startISO), end: new Date(endISO) };
+    let summary = await DB.get("dailySummaries", key);
+    if (!summary || summary.cashIn == null) {
+      summary = await freezeBusinessDay(range);
+    }
+    if (!summary) {
+      App.toast("این روز هنوز باز است و قابل تطبیق نیست");
+      return;
+    }
+
+    let netCash = summary.cashIn - summary.cashOut;
+    App.openModal(`
+      <h2>تطبیق صندوق روز ${key}</h2>
+      <div class="report-summary">
+        <div class="summary-item"><div class="summary-label">نقدی دریافتی</div><div class="summary-value">${Utils.formatCurrency(summary.cashIn)}</div></div>
+        <div class="summary-item"><div class="summary-label">کارتی دریافتی</div><div class="summary-value">${Utils.formatCurrency(summary.cardIn)}</div></div>
+        <div class="summary-item"><div class="summary-label">نقدی پرداختی</div><div class="summary-value amount negative">${Utils.formatCurrency(summary.cashOut)}</div></div>
+        <div class="summary-item"><div class="summary-label">مانده نقدی</div><div class="summary-value font-bold">${Utils.formatCurrency(netCash)}</div></div>
+      </div>
+      <div class="text-muted text-sm" style="margin-top:4px">توجه: خریدهای پاسارگاد در جمع کارتخوان (POS) لحاظ نشده‌اند؛ کارتخوان فقط دریافتی‌های کارتی مشتریان است.</div>
+      <div class="form-inline" style="margin-top:12px">
+        <div class="form-group"><label>مبلغ شمارش‌شده صندوق</label><input type="number" id="reconCashCounted" placeholder="0" min="0" value="${summary.cashCounted != null ? summary.cashCounted : ''}" oninput="Reports.previewDayRecon(${netCash}, ${summary.cardIn})"></div>
+        <div class="form-group"><label>مبلغ کارتخوان</label><input type="number" id="reconCardReceived" placeholder="0" min="0" value="${summary.cardReceived != null ? summary.cardReceived : ''}" oninput="Reports.previewDayRecon(${netCash}, ${summary.cardIn})"></div>
+      </div>
+      <div style="margin-top:8px">
+        <div class="list-row"><span class="row-label">اختلاف نقدی</span><span class="row-value" id="reconDiffCash">${summary.diffCash != null ? Utils.formatCurrency(summary.diffCash) : '-'}</span></div>
+        <div class="list-row"><span class="row-label">اختلاف کارتخوان</span><span class="row-value" id="reconDiffCard">${summary.diffCard != null ? Utils.formatCurrency(summary.diffCard) : '-'}</span></div>
+      </div>
+      ${summary.reconConfirmedAt ? `<div class="text-muted text-sm" style="margin-top:4px">آخرین تأیید: ${Jalali.formatDateTime(summary.reconConfirmedAt)}${summary.reconConfirmedBy ? " توسط " + summary.reconConfirmedBy : ""}</div>` : ""}
+      <div class="modal-actions">
+        <button class="btn btn-success" onclick="Reports.saveDayRecon('${key}', ${netCash}, ${summary.cardIn})">ذخیره</button>
+        <button class="btn btn-outline" onclick="App.closeModalForce()">انصراف</button>
+      </div>
+    `);
+  }
+
+  // Live diff preview only — purely cosmetic, reads the frozen netCash/cardIn
+  // baked into the modal's onclick and never touches dailySummaries.
+  function previewDayRecon(netCash, cardIn) {
+    let cashCountedRaw = document.getElementById("reconCashCounted")?.value;
+    let cardReceivedRaw = document.getElementById("reconCardReceived")?.value;
+    let dc = document.getElementById("reconDiffCash");
+    let dcd = document.getElementById("reconDiffCard");
+    if (dc) {
+      if (cashCountedRaw === "" || cashCountedRaw == null) { dc.textContent = "-"; dc.className = "row-value"; }
+      else { let diff = (parseInt(cashCountedRaw) || 0) - netCash; dc.textContent = Utils.formatCurrency(diff); dc.className = "row-value " + (diff !== 0 ? "amount negative" : "amount positive"); }
+    }
+    if (dcd) {
+      if (cardReceivedRaw === "" || cardReceivedRaw == null) { dcd.textContent = "-"; dcd.className = "row-value"; }
+      else { let diff = (parseInt(cardReceivedRaw) || 0) - cardIn; dcd.textContent = Utils.formatCurrency(diff); dcd.className = "row-value " + (diff !== 0 ? "amount negative" : "amount positive"); }
+    }
+  }
+
+  // Persists staff's till confirmation for an already-frozen business day.
+  // Only ever adds/updates cashCounted, cardReceived, diffCash, diffCard,
+  // reconConfirmedAt, reconConfirmedBy — cashIn/cardIn/cashOut/cardOut (the
+  // frozen system totals) are read here for the diff math but never rewritten,
+  // so a later autoClosePastDays tick (which only fills in missing totals,
+  // never overwrites an existing frozen row) can't wipe or change this.
+  async function saveDayRecon(key, netCash, cardIn) {
+    let cashCountedInput = document.getElementById("reconCashCounted");
+    let cardReceivedInput = document.getElementById("reconCardReceived");
+    let cashCountedRaw = cashCountedInput ? cashCountedInput.value.trim() : "";
+    let cardReceivedRaw = cardReceivedInput ? cardReceivedInput.value.trim() : "";
+    if (!cashCountedRaw || !cardReceivedRaw) {
+      App.toast("مبلغ شمارش‌شده صندوق و کارتخوان هر دو الزامی است");
+      return;
+    }
+
+    let summary = await DB.get("dailySummaries", key);
+    if (!summary) {
+      App.toast("خطا: اطلاعات این روز یافت نشد");
+      return;
+    }
+
+    let cashCounted = parseInt(cashCountedRaw) || 0;
+    let cardReceived = parseInt(cardReceivedRaw) || 0;
+    summary.cashCounted = cashCounted;
+    summary.cardReceived = cardReceived;
+    summary.diffCash = cashCounted - netCash;
+    summary.diffCard = cardReceived - cardIn;
+    summary.reconConfirmedAt = new Date().toISOString();
+    let session = Auth.getSession();
+    summary.reconConfirmedBy = session ? (session.name || session.username || "") : "";
+
+    await DB.put("dailySummaries", summary);
+    await DB.logActivity("تطبیق صندوق", "تاریخ: " + key + " | شمارش‌شده نقدی: " + Utils.formatCurrency(cashCounted) + " | کارتخوان: " + Utils.formatCurrency(cardReceived));
+    App.closeModalForce();
+    App.toast("تطبیق صندوق ذخیره شد");
+    await loadMonthlyReport();
   }
 
   async function showFullTransactions() {
@@ -939,15 +980,17 @@ const Reports = (function () {
     }
 
     // Day-close summary records within the month, keyed by the business-day
-    // key (see Utils.getBusinessDayKey) that closeDay actually saves under —
+    // key (see Utils.getBusinessDayKey) that freezeBusinessDay actually saves under —
     // matching by that key, not by string-prefixing "year/month", keeps this
     // in sync with how dailySummaries.date is produced.
     let monthSummaries = dailySummaries.filter((s) => s.date && s.date.startsWith(year + "/" + String(month).padStart(2, "0")));
     if (monthSummaries.length) {
       let wsSummary = XLSX.utils.json_to_sheet(monthSummaries.map((s) => ({
         "تاریخ": s.date, "نقدی ورودی": s.cashIn, "کارتی ورودی": s.cardIn, "نقدی خروجی": s.cashOut, "کارتی خروجی": s.cardOut,
+        "زمان بستن خودکار": s.autoClosedAt ? Jalali.formatDateTime(s.autoClosedAt) : "",
         "شمارش‌شده نقدی": s.cashCounted != null ? s.cashCounted : "", "کارتخوان": s.cardReceived != null ? s.cardReceived : "",
         "اختلاف نقدی": s.diffCash != null ? s.diffCash : "", "اختلاف کارتخوان": s.diffCard != null ? s.diffCard : "",
+        "زمان تأیید تطبیق": s.reconConfirmedAt ? Jalali.formatDateTime(s.reconConfirmedAt) : "",
       })));
       XLSX.utils.book_append_sheet(wb, wsSummary, "بستن روز");
     }
@@ -967,5 +1010,5 @@ const Reports = (function () {
     App.toast("اکسل دانلود شد");
   }
 
-  return { renderDaily, renderInstant, renderMonthly, loadMonthlyReport, showFullTransactions, exportDailyExcel, exportMonthlyExcel, closeDay, editTransaction, saveEditTransaction, deleteTransaction, reversePayment, calculateDailyTotals, freezeBusinessDay, autoClosePastDays };
+  return { renderDaily, renderInstant, renderMonthly, loadMonthlyReport, showFullTransactions, exportDailyExcel, exportMonthlyExcel, showDayRecon, previewDayRecon, saveDayRecon, editTransaction, saveEditTransaction, deleteTransaction, reversePayment, calculateDailyTotals, freezeBusinessDay, autoClosePastDays };
 })();
