@@ -269,21 +269,26 @@ const Customers = (function () {
   }
 
   async function doCharge(id) {
-    let amount = parseInt(document.getElementById("chargeAmount").value) || 0;
-    let payType = document.getElementById("chargePayType").value;
-    if (amount <= 0) {
-      App.toast("مبلغ نامعتبر");
-      return;
-    }
-    let c = await DB.get("customers", id);
-    if (!c) { App.toast("مشتری یافت نشد"); return; }
-    c.wallet += amount;
-    await DB.put("customers", c);
-    await DB.add("walletCharges", { customerId: id, amount: amount, paymentType: payType, date: new Date().toISOString() });
-    await DB.logActivity("شارژ کیف‌پول", "ایدی #" + (c.displayId || c.id) + " - مبلغ: " + Utils.formatCurrency(amount) + " (" + (payType === 'cash' ? 'نقدی' : 'کارتی') + ")");
-    App.toast("حساب با موفقیت شارژ شد");
-    App.closeModalForce();
-    refresh();
+    await Utils.guardDoubleClick(async () => {
+      let amount = parseInt(document.getElementById("chargeAmount").value) || 0;
+      let payType = document.getElementById("chargePayType").value;
+      if (amount <= 0) {
+        App.toast("مبلغ نامعتبر");
+        return { success: false };
+      }
+      let c = await DB.get("customers", id);
+      if (!c) { App.toast("مشتری یافت نشد"); return { success: false }; }
+      c.wallet += amount;
+      await DB.runAtomic([
+        { store: "customers", type: "put", data: c },
+        { store: "walletCharges", type: "add", data: { customerId: id, amount: amount, paymentType: payType, date: new Date().toISOString() } },
+      ]);
+      await DB.logActivity("شارژ کیف‌پول", "ایدی #" + (c.displayId || c.id) + " - مبلغ: " + Utils.formatCurrency(amount) + " (" + (payType === 'cash' ? 'نقدی' : 'کارتی') + ")");
+      App.toast("حساب با موفقیت شارژ شد");
+      App.closeModalForce();
+      refresh();
+      return { success: true };
+    });
   }
 
   async function showPayDebt(id) {
@@ -313,23 +318,31 @@ const Customers = (function () {
   }
 
   async function doPayDebt(id) {
-    let amount = parseInt(document.getElementById("payAmount").value) || 0;
-    let payType = document.getElementById("payType").value;
-    if (amount <= 0) {
-      App.toast("مبلغ نامعتبر");
-      return;
-    }
-    let c = await DB.get("customers", id);
-    if (!c) { App.toast("مشتری یافت نشد"); return; }
-    if (amount > c.debt) amount = c.debt;
-    c.debt -= amount;
-    c.totalPaid = (c.totalPaid || 0) + amount;
-    await DB.put("customers", c);
-    await DB.add("debtPayments", { customerId: id, amount: amount, paymentType: payType, date: new Date().toISOString() });
-    await DB.logActivity("پرداخت بدهی", "ایدی #" + (c.displayId || c.id) + " - مبلغ: " + Utils.formatCurrency(amount) + " (" + (payType === 'cash' ? 'نقدی' : 'کارتی') + ")");
-    App.toast("بدهی با موفقیت پرداخت شد");
-    App.closeModalForce();
-    refresh();
+    await Utils.guardDoubleClick(async () => {
+      let amount = parseInt(document.getElementById("payAmount").value) || 0;
+      let payType = document.getElementById("payType").value;
+      if (amount <= 0) {
+        App.toast("مبلغ نامعتبر");
+        return { success: false };
+      }
+      let c = await DB.get("customers", id);
+      if (!c) { App.toast("مشتری یافت نشد"); return { success: false }; }
+      if (amount > c.debt) amount = c.debt;
+      // Re-check after capping: paying a customer with zero debt must not insert
+      // a 0-amount debtPayments row.
+      if (amount <= 0) { App.toast("بدهی برای پرداخت وجود ندارد"); return { success: false }; }
+      c.debt -= amount;
+      c.totalPaid = (c.totalPaid || 0) + amount;
+      await DB.runAtomic([
+        { store: "customers", type: "put", data: c },
+        { store: "debtPayments", type: "add", data: { customerId: id, amount: amount, paymentType: payType, date: new Date().toISOString() } },
+      ]);
+      await DB.logActivity("پرداخت بدهی", "ایدی #" + (c.displayId || c.id) + " - مبلغ: " + Utils.formatCurrency(amount) + " (" + (payType === 'cash' ? 'نقدی' : 'کارتی') + ")");
+      App.toast("بدهی با موفقیت پرداخت شد");
+      App.closeModalForce();
+      refresh();
+      return { success: true };
+    });
   }
 
   async function showManualAdjust(id) {

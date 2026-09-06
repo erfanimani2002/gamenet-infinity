@@ -143,74 +143,68 @@ const Cafe = (function () {
   }
 
   async function placeOrder() {
-    if (!selectedCustomerId) {
-      App.toast("شناسه مشتری را انتخاب کنید");
-      return;
-    }
-    let payType = document.getElementById("cafePayType").value;
-    let total = cart.reduce((sum, item) => sum + (item.price * item.qty), 0);
-
-    // Stock is reserved only at checkout, not at add-to-cart time, so re-check
-    // and deduct it here — right before the order is finalized — to avoid
-    // leaking inventory on abandoned carts.
-    for (let cartItem of cart) {
-      let dbItem = await DB.get("cafeItems", cartItem.id);
-      if (dbItem && !dbItem.unlimited && dbItem.stock < cartItem.qty) {
-        App.toast("موجودی «" + dbItem.name + "» کافی نیست");
-        return;
+    await Utils.guardDoubleClick(async () => {
+      if (!selectedCustomerId) {
+        App.toast("شناسه مشتری را انتخاب کنید");
+        return { success: false };
       }
-    }
-    for (let cartItem of cart) {
-      let dbItem = await DB.get("cafeItems", cartItem.id);
-      if (dbItem && !dbItem.unlimited) {
-        dbItem.stock -= cartItem.qty;
-        await DB.put("cafeItems", dbItem);
-      }
-    }
+      let payType = document.getElementById("cafePayType").value;
+      let total = cart.reduce((sum, item) => sum + (item.price * item.qty), 0);
+      if (total <= 0) { App.toast("سبد خرید خالی است"); return { success: false }; }
 
-    if (payType === "wallet") {
+      // Re-check stock now (reserved at checkout, not add-to-cart) and capture
+      // the live cafeItems rows so stock can be deducted in the SAME atomic
+      // transaction as the payment and order write below.
+      let cafeItemMap = {};
+      for (let cartItem of cart) {
+        let dbItem = await DB.get("cafeItems", cartItem.id);
+        if (dbItem && !dbItem.unlimited && dbItem.stock < cartItem.qty) {
+          App.toast("موجودی «" + dbItem.name + "» کافی نیست");
+          return { success: false };
+        }
+        cafeItemMap[cartItem.id] = dbItem;
+      }
+
+      // ONE WALLET RULE: computePaymentUpdate splits an insufficient wallet into
+      // wallet + debt legs and returns the effective payType + payBreakdown, so
+      // the order never records a fake "wallet" payType on top of hidden debt.
       let customer = await DB.get("customers", selectedCustomerId);
-      if (!customer) { App.toast("مشتری یافت نشد"); return; }
-      if (customer.wallet >= total) {
-        customer.wallet -= total;
-        customer.totalPaid = (customer.totalPaid || 0) + total;
-        await DB.put("customers", customer);
-      } else {
-        let remaining = total - customer.wallet;
-        customer.totalPaid = (customer.totalPaid || 0) + customer.wallet;
-        customer.wallet = 0;
-        customer.debt = (customer.debt || 0) + remaining;
-        await DB.put("customers", customer);
+      if (!customer) { App.toast("مشتری یافت نشد"); return { success: false }; }
+      let payResult = Utils.computePaymentUpdate(customer, total, payType);
+      if (!payResult.success) { App.toast("پرداخت ناموفق بود"); return { success: false }; }
+
+      let order = {
+        customerId: selectedCustomerId,
+        items: cart.map((i) => ({ id: i.id, name: i.name, price: i.price, qty: i.qty })),
+        total: total,
+        payType: payResult.payType,
+        payBreakdown: payResult.payBreakdown,
+        createdAt: new Date().toISOString(),
+      };
+
+      // customers + cafeItems (stock) + cafeOrders write in one transaction, so
+      // a crash can't pay without recording the order, or deduct stock without a
+      // payment. Nothing is committed on failure, so no rollback is needed.
+      let ops = [{ store: "customers", type: "put", data: payResult.customer }];
+      for (let cartItem of cart) {
+        let dbItem = cafeItemMap[cartItem.id];
+        if (dbItem && !dbItem.unlimited) {
+          dbItem.stock -= cartItem.qty;
+          ops.push({ store: "cafeItems", type: "put", data: dbItem });
+        }
       }
-    } else if (payType === "debt") {
-      let customer = await DB.get("customers", selectedCustomerId);
-      if (!customer) { App.toast("مشتری یافت نشد"); return; }
-      customer.debt = (customer.debt || 0) + total;
-      await DB.put("customers", customer);
-    } else {
-      let customer = await DB.get("customers", selectedCustomerId);
-      if (customer) {
-        customer.totalPaid = (customer.totalPaid || 0) + total;
-        await DB.put("customers", customer);
-      }
-    }
+      ops.push({ store: "cafeOrders", type: "add", data: order });
 
-    let order = {
-      customerId: selectedCustomerId,
-      items: [...cart],
-      total: total,
-      payType: payType,
-      createdAt: new Date().toISOString(),
-    };
+      await DB.runAtomic(ops);
+      await DB.logActivity("سفارش کافی‌شاپ", "شناسه #" + selectedCustomerId + " | مبلغ: " + Utils.formatCurrency(total) + " | " + payResult.payType);
 
-    await DB.add("cafeOrders", order);
-    await DB.logActivity("سفارش کافی‌شاپ", "شناسه #" + selectedCustomerId + " | مبلغ: " + Utils.formatCurrency(total) + " | " + payType);
-
-    cart = [];
-    selectedCustomerId = null;
-    App.closeModalForce();
-    App.toast("سفارش ثبت شد");
-    refresh();
+      cart = [];
+      selectedCustomerId = null;
+      App.closeModalForce();
+      App.toast("سفارش ثبت شد");
+      refresh();
+      return { success: true };
+    });
   }
 
   function refresh() {

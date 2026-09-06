@@ -125,26 +125,48 @@ const Utils = (function () {
     return item ? item.label : value;
   }
 
-  // Computes the customer mutation for a payment without writing it to the DB,
-  // so callers that need to persist it atomically alongside other store writes
-  // (see DB.runAtomic) can do so in one transaction.
+  // Computes the customer mutation for a payment WITHOUT writing it to the DB,
+  // so callers can persist it atomically alongside other store writes via
+  // DB.runAtomic. Returns { success, customer, payType, payBreakdown }.
+  //
+  // ONE WALLET RULE: a "wallet" payment that exceeds the available balance is
+  // SPLIT — the available wallet is applied as wallet, the remainder as debt —
+  // instead of being rejected (or, worse, silently spilled into debt while the
+  // record keeps a fake "wallet" payType). `payBreakdown` records every leg
+  // ({ wallet, debt, cash, card }) so reversePayment can undo each leg exactly.
   function computePaymentUpdate(customer, amount, payType) {
     if (!customer) return { success: false, reason: "no_customer" };
-    if (payType === "wallet") {
-      // Partial wallet payments are disallowed: applyPayment/reversePayment must
-      // stay true inverses of each other, and a wallet payment that silently
-      // spills into debt cannot be reversed correctly later (see bug #1).
-      if ((customer.wallet || 0) < amount) {
-        return { success: false, reason: "insufficient_wallet" };
-      }
-      customer.wallet -= amount;
+    let breakdown = { wallet: 0, debt: 0, cash: 0, card: 0 };
+    let effective = payType;
+    if (payType === "cash") {
+      breakdown.cash = amount;
+      customer.totalPaid = (customer.totalPaid || 0) + amount;
+    } else if (payType === "card") {
+      breakdown.card = amount;
       customer.totalPaid = (customer.totalPaid || 0) + amount;
     } else if (payType === "debt") {
+      breakdown.debt = amount;
       customer.debt = (customer.debt || 0) + amount;
+    } else if (payType === "wallet") {
+      let wallet = customer.wallet || 0;
+      if (wallet >= amount) {
+        breakdown.wallet = amount;
+        customer.wallet = wallet - amount;
+        customer.totalPaid = (customer.totalPaid || 0) + amount;
+      } else {
+        breakdown.wallet = wallet;
+        breakdown.debt = amount - wallet;
+        customer.wallet = 0;
+        customer.totalPaid = (customer.totalPaid || 0) + wallet;
+        customer.debt = (customer.debt || 0) + (amount - wallet);
+        effective = "split";
+      }
     } else {
+      // Unknown method: preserve old behaviour (treat as paid / cash leg).
+      breakdown.cash = amount;
       customer.totalPaid = (customer.totalPaid || 0) + amount;
     }
-    return { success: true, customer };
+    return { success: true, customer, payType: effective, payBreakdown: breakdown };
   }
 
   async function applyPayment(customerId, amount, payType) {
@@ -152,7 +174,7 @@ const Utils = (function () {
     let result = computePaymentUpdate(customer, amount, payType);
     if (!result.success) return result;
     await DB.put("customers", result.customer);
-    return { success: true };
+    return { success: true, payType: result.payType, payBreakdown: result.payBreakdown };
   }
 
   // Prevents a double-click (or a second click before the first finishes) from
@@ -160,17 +182,18 @@ const Utils = (function () {
   // for the duration of `fn`, re-enabling it only if `fn` throws or returns a
   // falsy/`{success:false}` result — a successful action normally closes the
   // modal or re-renders, so there's no button left to re-enable.
+  // The button is detected via document.activeElement (a clicked button gains
+  // focus in every browser), NOT window.event, which is undefined in Firefox.
   async function guardDoubleClick(fn) {
-    let btn = window.event && window.event.target && window.event.target.closest
-      ? window.event.target.closest("button")
-      : null;
+    let btn = document.activeElement;
+    if (btn && btn.tagName !== "BUTTON") btn = null;
     if (btn) {
-      if (btn.disabled) return; // already processing this click
+      if (btn.disabled) return { success: false, alreadyLocked: true }; // already processing
       btn.disabled = true;
     }
     try {
       let result = await fn();
-      if (btn && result && result.success === false) btn.disabled = false;
+      if (btn && (!result || result.success === false)) btn.disabled = false;
       return result;
     } catch (err) {
       if (btn) btn.disabled = false;

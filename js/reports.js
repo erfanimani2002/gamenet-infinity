@@ -25,21 +25,51 @@ const Reports = (function () {
     // "فروش / عملیات" breakdown so managers can see revenue that didn't move
     // through the till (already-collected wallet balance or a new receivable) —
     // they must NEVER be added into totalCashIn/totalCardIn below.
-    let calcSection = (sessionsList) => {
-      let cash = 0, card = 0, wallet = 0, debt = 0;
-      sessionsList.forEach((s) => {
-        let amt = s.settleAmount || 0;
-        if (s.settlePayType === "cash") cash += amt;
-        else if (s.settlePayType === "card") card += amt;
-        else if (s.settlePayType === "wallet") wallet += amt;
-        else if (s.settlePayType === "debt") debt += amt;
-      });
-      return { cash, card, wallet, debt, total: cash + card + wallet + debt };
+    //
+    // A settled payment may now carry `payBreakdown` ({wallet,debt,cash,card})
+    // from split wallet→debt payments; when present we expand that exact leg
+    // split. `legsOf` turns an amount into its four legs honoring a breakdown.
+    let legsOf = (amount, payType, breakdown) => {
+      let legs = { cash: 0, card: 0, wallet: 0, debt: 0 };
+      if (breakdown && typeof breakdown === "object") {
+        let w = breakdown.wallet || 0, d = breakdown.debt || 0, c = breakdown.cash || 0, cd = breakdown.card || 0;
+        let sum = w + d + c + cd;
+        if (sum > 0) {
+          let k = amount / sum;
+          legs.wallet = w * k; legs.debt = d * k; legs.cash = c * k; legs.card = cd * k;
+        } else {
+          legs.cash = amount;
+        }
+      } else if (payType === "cash") legs.cash = amount;
+      else if (payType === "card") legs.card = amount;
+      else if (payType === "wallet") legs.wallet = amount;
+      else if (payType === "debt") legs.debt = amount;
+      else legs.cash = amount;
+      return legs;
+    };
+    let addLegs = (target, amount, payType, breakdown) => {
+      let legs = legsOf(amount, payType, breakdown);
+      target.cash += legs.cash; target.card += legs.card; target.wallet += legs.wallet; target.debt += legs.debt;
     };
 
-    let consoleCalc = calcSection(settledSessions.filter((s) => s.deviceType === "console"));
-    let billiardCalc = calcSection(settledSessions.filter((s) => s.deviceType === "billiard"));
-    let pcCalc = calcSection(settledSessions.filter((s) => s.deviceType === "pc"));
+    let consoleCalc = { cash: 0, card: 0, wallet: 0, debt: 0 };
+    let billiardCalc = { cash: 0, card: 0, wallet: 0, debt: 0 };
+    let pcCalc = { cash: 0, card: 0, wallet: 0, debt: 0 };
+    settledSessions.forEach((s) => {
+      let amt = s.settleAmount || 0;
+      let sb = s.settleBreakdown;
+      // A transferred session records which devices its blocks ran on; attribute
+      // the settle across those device types instead of dumping the whole total
+      // into the final device (see confirmSettleSession). Falls back to the
+      // session's own deviceType for records predating the breakdown.
+      if (sb && typeof sb === "object" && ((sb.console || 0) + (sb.billiard || 0) + (sb.pc || 0)) > 0) {
+        addLegs(consoleCalc, sb.console || 0, s.settlePayType, s.payBreakdown);
+        addLegs(billiardCalc, sb.billiard || 0, s.settlePayType, s.payBreakdown);
+        addLegs(pcCalc, sb.pc || 0, s.settlePayType, s.payBreakdown);
+      } else if (s.deviceType === "console") addLegs(consoleCalc, amt, s.settlePayType, s.payBreakdown);
+      else if (s.deviceType === "billiard") addLegs(billiardCalc, amt, s.settlePayType, s.payBreakdown);
+      else addLegs(pcCalc, amt, s.settlePayType, s.payBreakdown);
+    });
 
     let consoleBlock = { cash: 0, card: 0, wallet: 0, debt: 0 };
     let billiardBlock = { cash: 0, card: 0, wallet: 0, debt: 0 };
@@ -48,18 +78,14 @@ const Reports = (function () {
     dailyBlockPayments.forEach((bp) => {
       let amt = bp.amount || 0;
       let target = bp.deviceType === "console" ? consoleBlock : bp.deviceType === "tournament" ? tournamentMatchBlock : billiardBlock;
-      if (bp.payType === "cash") target.cash += amt;
-      else if (bp.payType === "card") target.card += amt;
-      else if (bp.payType === "wallet") target.wallet += amt;
-      else if (bp.payType === "debt") target.debt += amt;
+      let legs = legsOf(amt, bp.payType, bp.payBreakdown);
+      target.cash += legs.cash; target.card += legs.card; target.wallet += legs.wallet; target.debt += legs.debt;
     });
 
     let cafeCash = 0, cafeCard = 0, cafeWallet = 0, cafeDebt = 0;
     dailyOrders.forEach((o) => {
-      if (o.payType === "cash") cafeCash += o.total;
-      else if (o.payType === "card") cafeCard += o.total;
-      else if (o.payType === "wallet") cafeWallet += o.total;
-      else if (o.payType === "debt") cafeDebt += o.total;
+      let legs = legsOf(o.total, o.payType, o.payBreakdown);
+      cafeCash += legs.cash; cafeCard += legs.card; cafeWallet += legs.wallet; cafeDebt += legs.debt;
     });
 
     let debtCash = 0, debtCard = 0;
@@ -87,10 +113,8 @@ const Reports = (function () {
       if (!t.entryFeeStatus) return;
       Object.values(t.entryFeeStatus).forEach((efs) => {
         if (efs.collected && efs.settledAt && Utils.isInRange(efs.settledAt, range.start, range.end)) {
-          if (efs.payType === "cash") tournamentCash += t.entryFee || 0;
-          else if (efs.payType === "card") tournamentCard += t.entryFee || 0;
-          else if (efs.payType === "wallet") tournamentWallet += t.entryFee || 0;
-          else if (efs.payType === "debt") tournamentDebt += t.entryFee || 0;
+          let legs = legsOf(t.entryFee || 0, efs.payType, efs.payBreakdown);
+          tournamentCash += legs.cash; tournamentCard += legs.card; tournamentWallet += legs.wallet; tournamentDebt += legs.debt;
         }
       });
     });
@@ -511,15 +535,34 @@ const Reports = (function () {
     `);
   }
 
-  async function reversePayment(customerId, amount, payType) {
+  // Reverses a payment against a customer. When `payBreakdown` is provided (the
+  // canonical record of each leg kept by split wallet→debt payments), each leg
+  // is undone exactly: wallet is credited back, debt is reduced, and cash/card
+  // reduce totalPaid. Without a breakdown it falls back to the legacy single-leg
+  // interpretation of payType, so older records keep reversing correctly.
+  async function reversePayment(customerId, amount, payType, payBreakdown) {
     if (!customerId || !amount) return;
     let customer = await DB.get("customers", customerId);
     if (!customer) return;
-    if (payType === "wallet") {
-      customer.wallet += amount;
+    if (payBreakdown && typeof payBreakdown === "object") {
+      let w = payBreakdown.wallet || 0;
+      let d = payBreakdown.debt || 0;
+      let other = (payBreakdown.cash || 0) + (payBreakdown.card || 0);
+      if (w) {
+        customer.wallet = (customer.wallet || 0) + w;
+        customer.totalPaid = Math.max(0, (customer.totalPaid || 0) - w);
+      }
+      if (d) {
+        customer.debt = Math.max(0, (customer.debt || 0) - d);
+      }
+      if (other) {
+        customer.totalPaid = Math.max(0, (customer.totalPaid || 0) - other);
+      }
+    } else if (payType === "wallet") {
+      customer.wallet = (customer.wallet || 0) + amount;
       customer.totalPaid = Math.max(0, (customer.totalPaid || 0) - amount);
     } else if (payType === "debt") {
-      customer.debt = Math.max(0, customer.debt - amount);
+      customer.debt = Math.max(0, (customer.debt || 0) - amount);
     } else {
       customer.totalPaid = Math.max(0, (customer.totalPaid || 0) - amount);
     }
@@ -536,7 +579,7 @@ const Reports = (function () {
         let oldPayType = session.settlePayType || "cash";
         let customerId = session.settlePayerId || (session.ids && session.ids[0]) || null;
         if (customerId && (oldAmount !== newAmount || oldPayType !== newPayType)) {
-          await reversePayment(customerId, oldAmount, oldPayType);
+          await reversePayment(customerId, oldAmount, oldPayType, session.payBreakdown);
           let payResult = await Utils.applyPayment(customerId, newAmount, newPayType);
           if (!payResult.success) {
             // Roll back to the original payment so the reversal above doesn't
@@ -545,6 +588,7 @@ const Reports = (function () {
             App.toast(payResult.reason === "insufficient_wallet" ? "موجودی کیف‌پول کافی نیست" : "پرداخت ناموفق بود");
             return;
           }
+          session.payBreakdown = payResult.payBreakdown;
         }
         session.settleAmount = newAmount;
         session.settlePayType = newPayType;
@@ -556,13 +600,14 @@ const Reports = (function () {
         let oldAmount = bp.amount || 0;
         let oldPayType = bp.payType || "cash";
         if (bp.customerId && (oldAmount !== newAmount || oldPayType !== newPayType)) {
-          await reversePayment(bp.customerId, oldAmount, oldPayType);
+          await reversePayment(bp.customerId, oldAmount, oldPayType, bp.payBreakdown);
           let payResult = await Utils.applyPayment(bp.customerId, newAmount, newPayType);
           if (!payResult.success) {
             await Utils.applyPayment(bp.customerId, oldAmount, oldPayType);
             App.toast(payResult.reason === "insufficient_wallet" ? "موجودی کیف‌پول کافی نیست" : "پرداخت ناموفق بود");
             return;
           }
+          bp.payBreakdown = payResult.payBreakdown;
         }
         bp.amount = newAmount;
         bp.payType = newPayType;
@@ -574,13 +619,14 @@ const Reports = (function () {
         let oldAmount = order.total || 0;
         let oldPayType = order.payType || "cash";
         if (order.customerId && (oldAmount !== newAmount || oldPayType !== newPayType)) {
-          await reversePayment(order.customerId, oldAmount, oldPayType);
+          await reversePayment(order.customerId, oldAmount, oldPayType, order.payBreakdown);
           let payResult = await Utils.applyPayment(order.customerId, newAmount, newPayType);
           if (!payResult.success) {
             await Utils.applyPayment(order.customerId, oldAmount, oldPayType);
             App.toast(payResult.reason === "insufficient_wallet" ? "موجودی کیف‌پول کافی نیست" : "پرداخت ناموفق بود");
             return;
           }
+          order.payBreakdown = payResult.payBreakdown;
         }
         order.total = newAmount;
         order.payType = newPayType;
@@ -599,8 +645,10 @@ const Reports = (function () {
       if (session) {
         let customerId = session.settlePayerId || (session.ids && session.ids[0]) || null;
         if (customerId) {
-          await reversePayment(customerId, session.settleAmount || 0, session.settlePayType || "cash");
+          await reversePayment(customerId, session.settleAmount || 0, session.settlePayType || "cash", session.payBreakdown);
         }
+        // Restore cafe item stock for items attached to this session.
+        await restoreCafeStock(session.items || []);
         session.status = "deleted";
         session.settledAt = null;
         await DB.put("sessions", session);
@@ -609,7 +657,7 @@ const Reports = (function () {
       let bp = await DB.get("blockPayments", id);
       if (bp) {
         if (bp.customerId) {
-          await reversePayment(bp.customerId, bp.amount || 0, bp.payType || "cash");
+          await reversePayment(bp.customerId, bp.amount || 0, bp.payType || "cash", bp.payBreakdown);
         }
         if (bp.deviceType === "tournament" && bp.matchId) {
           let match = await DB.get("matches", bp.matchId);
@@ -628,14 +676,33 @@ const Reports = (function () {
       let order = await DB.get("cafeOrders", id);
       if (order) {
         if (order.customerId) {
-          await reversePayment(order.customerId, order.total || 0, order.payType || "cash");
+          await reversePayment(order.customerId, order.total || 0, order.payType || "cash", order.payBreakdown);
         }
+        // Restore stock for the items in this cafe order.
+        await restoreCafeStock((order.items || []).map((i) => ({ itemId: i.id, name: i.name, qty: i.qty })));
         await DB.remove("cafeOrders", id);
       }
     }
     await DB.logActivity("حذف تراکنش", "نوع: " + type + " | شناسه: " + id);
     App.closeModalForce();
     App.toast("حذف شد");
+  }
+
+  // Returns cafe item stock for a list of { itemId, name, qty } item records by
+  // incrementing the matching cafeItems row. Item lookups prefer itemId (set on
+  // session/order items) and fall back to name for records predating itemId.
+  async function restoreCafeStock(items) {
+    let cafeItems = await DB.getAll("cafeItems");
+    for (let it of items) {
+      let cafeItem = it.itemId != null
+        ? cafeItems.find((ci) => ci.id === it.itemId)
+        : cafeItems.find((ci) => ci.name === it.name);
+      if (cafeItem && !cafeItem.unlimited) {
+        cafeItem.stock += (it.qty || 1);
+        cafeItem.stock = Math.max(0, cafeItem.stock);
+        await DB.put("cafeItems", cafeItem);
+      }
+    }
   }
 
   async function exportDailyExcel() {

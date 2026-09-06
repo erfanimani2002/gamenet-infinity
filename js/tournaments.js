@@ -239,7 +239,7 @@ const Tournaments = (function () {
       if (!m.settled) continue;
       let bp = allBp.find((r) => r.deviceType === "tournament" && r.matchId === m.id);
       if (bp) {
-        await Reports.reversePayment(bp.customerId, bp.amount, bp.payType);
+        await Reports.reversePayment(bp.customerId, bp.amount, bp.payType, bp.payBreakdown);
         await DB.remove("blockPayments", bp.id);
       } else {
         // Fall back to the match loser for records predating blockPayments tracking.
@@ -254,8 +254,23 @@ const Tournaments = (function () {
       for (let participantId in t.entryFeeStatus) {
         let efs = t.entryFeeStatus[participantId];
         if (!efs || !efs.collected) continue;
-        await Reports.reversePayment(efs.payerId || parseInt(participantId), t.entryFee, efs.payType);
+        await Reports.reversePayment(efs.payerId || parseInt(participantId), t.entryFee, efs.payType, efs.payBreakdown);
       }
+    }
+
+    // Reverse prize payouts and delete their rows. A wallet payout is credited
+    // back by subtracting the wallet (floored at 0); cash/card payouts only have
+    // their row removed — we do NOT fabricate cash back into the till.
+    let prizePayouts = (await DB.getAll("prizePayouts")).filter((p) => p.tournamentId === id);
+    for (let p of prizePayouts) {
+      if (p.payType === "wallet" && p.customerId) {
+        let winner = await DB.get("customers", p.customerId);
+        if (winner) {
+          winner.wallet = Math.max(0, (winner.wallet || 0) - (p.amount || 0));
+          await DB.put("customers", winner);
+        }
+      }
+      await DB.remove("prizePayouts", p.id);
     }
 
     let parts;
@@ -892,9 +907,9 @@ const Tournaments = (function () {
 
     if (match.deviceId) {
       let tournament = await DB.get("tournaments", match.tournamentId);
+      let pricing = await DB.getSetting("pricing", {});
       let rate = tournament.pcRateManual || 0;
       if (!rate) {
-        let pricing = await DB.getSetting("pricing", {});
         let device = await DB.get("devices", match.deviceId);
         if (device && device.type === "console") {
           rate = (pricing.consoleRates || {})[1] || 5000;
@@ -903,7 +918,7 @@ const Tournaments = (function () {
         }
       }
       let durationHours = (new Date(match.timerEnd) - new Date(match.timerStart)) / 3600000;
-      match.deviceCost = Math.round(rate * durationHours);
+      match.deviceCost = Utils.roundPrice(rate * durationHours, pricing.roundingUnit || 1000);
 
       // Free the device now that the match's timer has been settled/stopped,
       // the same way session-end frees a device — otherwise it would stay
@@ -1058,26 +1073,38 @@ const Tournaments = (function () {
   }
 
   async function confirmCollectEntryFee(tournamentId, participantId) {
-    let t = await DB.get("tournaments", tournamentId);
-    if (!t) return;
-    let payerId = parseInt(document.getElementById("entryPayerId").value) || participantId;
-    let payType = document.getElementById("entryPayType").value;
-    let settlerName = Utils.getSettlerName();
+    await Utils.guardDoubleClick(async () => {
+      let t = await DB.get("tournaments", tournamentId);
+      if (!t) return { success: false };
+      if (!t.entryFeeStatus) t.entryFeeStatus = {};
+      if (t.entryFeeStatus[participantId] && t.entryFeeStatus[participantId].collected) {
+        App.toast("حق ورود این شرکت‌کننده قبلاً دریافت شده");
+        return { success: false };
+      }
+      let payerId = parseInt(document.getElementById("entryPayerId").value) || participantId;
+      let payType = document.getElementById("entryPayType").value;
+      let settlerName = Utils.getSettlerName();
 
-    let payResult = await Utils.applyPayment(payerId, t.entryFee, payType);
-    if (!payResult.success) {
-      App.toast(payResult.reason === "insufficient_wallet" ? "موجودی کیف‌پول کافی نیست" : "پرداخت ناموفق بود");
-      return;
-    }
+      let customer = await DB.get("customers", payerId);
+      if (!customer) { App.toast("پرداخت‌کننده نامعتبر است"); return { success: false }; }
+      let payResult = Utils.computePaymentUpdate(customer, t.entryFee, payType);
+      if (!payResult.success) {
+        App.toast(payResult.reason === "insufficient_wallet" ? "موجودی کیف‌پول کافی نیست" : "پرداخت ناموفق بود");
+        return { success: false };
+      }
 
-    if (!t.entryFeeStatus) t.entryFeeStatus = {};
-    t.entryFeeStatus[participantId] = { collected: true, payerId, payType, settlerName, settledAt: new Date().toISOString() };
-    await DB.put("tournaments", t);
+      t.entryFeeStatus[participantId] = { collected: true, payerId, payType: payResult.payType, payBreakdown: payResult.payBreakdown, settlerName, settledAt: new Date().toISOString() };
+      await DB.runAtomic([
+        { store: "customers", type: "put", data: payResult.customer },
+        { store: "tournaments", type: "put", data: t },
+      ]);
 
-    await DB.logActivity("دریافت حق ورود مسابقه", t.name + " — " + Utils.formatCurrency(t.entryFee));
-    App.closeModalForce();
-    App.toast("حق ورود دریافت شد");
-    manageTournament(tournamentId);
+      await DB.logActivity("دریافت حق ورود مسابقه", t.name + " — " + Utils.formatCurrency(t.entryFee));
+      App.closeModalForce();
+      App.toast("حق ورود دریافت شد");
+      manageTournament(tournamentId);
+      return { success: true };
+    });
   }
 
   async function settleMatch(matchId) {
@@ -1116,39 +1143,54 @@ const Tournaments = (function () {
   }
 
   async function confirmSettleMatch(matchId, total) {
-    let match = await DB.get("matches", matchId);
-    if (!match) return;
-    let payerId = parseInt(document.getElementById("matchPayerId").value) || 0;
-    let payType = document.getElementById("matchPayType").value;
-    let settlerName = Utils.getSettlerName();
+    await Utils.guardDoubleClick(async () => {
+      let match = await DB.get("matches", matchId);
+      if (!match) return { success: false };
+      if (match.settled) { App.toast("این بازی قبلاً تسویه شده"); return { success: false }; }
+      let payerId = parseInt(document.getElementById("matchPayerId").value) || 0;
+      let payType = document.getElementById("matchPayType").value;
+      let settlerName = Utils.getSettlerName();
 
-    let customer = await DB.get("customers", payerId);
-    if (!customer) { App.toast("پرداخت‌کننده نامعتبر است"); return; }
+      // Recompute the total from the match itself, not the amount baked into the
+      // modal button (items may have been added after the modal opened).
+      let totalItems = (match.items || []).reduce((s, i) => s + (i.price * i.qty), 0);
+      let effectiveTotal = (match.deviceCost || 0) + totalItems;
+      if (effectiveTotal <= 0) { App.toast("هزینه‌ای برای تسویه وجود ندارد"); return { success: false }; }
 
-    let payResult = await Utils.applyPayment(payerId, total, payType);
-    if (!payResult.success) {
-      App.toast(payResult.reason === "insufficient_wallet" ? "موجودی کیف‌پول کافی نیست" : "پرداخت ناموفق بود");
-      return;
-    }
+      let customer = await DB.get("customers", payerId);
+      if (!customer) { App.toast("پرداخت‌کننده نامعتبر است"); return { success: false }; }
 
-    match.settled = true;
-    match.settlePayType = payType;
-    match.settleAmount = total;
-    match.settlerName = settlerName;
-    match.settledAt = new Date().toISOString();
-    await DB.put("matches", match);
-    await DB.add("blockPayments", {
-      customerId: payerId, sessionId: null, matchId: match.id,
-      deviceId: match.deviceId || null, deviceType: "tournament", blockIndex: null,
-      amount: total, payType: payType, settlerName: settlerName,
-      date: match.settledAt,
+      let payResult = Utils.computePaymentUpdate(customer, effectiveTotal, payType);
+      if (!payResult.success) {
+        App.toast(payResult.reason === "insufficient_wallet" ? "موجودی کیف‌پول کافی نیست" : "پرداخت ناموفق بود");
+        return { success: false };
+      }
+
+      match.settled = true;
+      match.settlePayType = payResult.payType;
+      match.payBreakdown = payResult.payBreakdown;
+      match.settleAmount = effectiveTotal;
+      match.settlerName = settlerName;
+      match.settledAt = new Date().toISOString();
+
+      await DB.runAtomic([
+        { store: "customers", type: "put", data: payResult.customer },
+        { store: "matches", type: "put", data: match },
+        { store: "blockPayments", type: "add", data: {
+          customerId: payerId, sessionId: null, matchId: match.id,
+          deviceId: match.deviceId || null, deviceType: "tournament", blockIndex: null,
+          amount: effectiveTotal, payType: payResult.payType, payBreakdown: payResult.payBreakdown, settlerName: settlerName,
+          date: match.settledAt,
+        } },
+      ]);
+
+      let tournament = await DB.get("tournaments", match.tournamentId);
+      await DB.logActivity("تسویه بازی مسابقه", (tournament ? tournament.name : '') + " — " + Utils.formatCurrency(effectiveTotal));
+      App.closeModalForce();
+      App.toast("بازی تسویه شد");
+      manageTournament(match.tournamentId);
+      return { success: true };
     });
-
-    let tournament = await DB.get("tournaments", match.tournamentId);
-    await DB.logActivity("تسویه بازی مسابقه", (tournament ? tournament.name : '') + " — " + Utils.formatCurrency(total));
-    App.closeModalForce();
-    App.toast("بازی تسویه شد");
-    manageTournament(match.tournamentId);
   }
 
   async function settleAllMatches(tournamentId) {
@@ -1175,45 +1217,55 @@ const Tournaments = (function () {
   }
 
   async function confirmSettleAllMatches(tournamentId) {
-    let t = await DB.get("tournaments", tournamentId);
-    if (!t) return;
-    let payType = document.getElementById("bulkSettlePayType")?.value || "cash";
-    let matches;
-    try { matches = await DB.getByIndex("matches", "by_tournament", tournamentId); } catch (e) { matches = (await DB.getAll("matches")).filter((m) => m.tournamentId === tournamentId); }
+    await Utils.guardDoubleClick(async () => {
+      let t = await DB.get("tournaments", tournamentId);
+      if (!t) return { success: false };
+      let payType = document.getElementById("bulkSettlePayType")?.value || "cash";
+      let matches;
+      try { matches = await DB.getByIndex("matches", "by_tournament", tournamentId); } catch (e) { matches = (await DB.getAll("matches")).filter((m) => m.tournamentId === tournamentId); }
 
-    let unsettled = matches.filter((m) => !m.settled && ((m.deviceCost || 0) > 0 || (m.items || []).length > 0));
-    if (unsettled.length === 0) { App.toast("بازی تسویه‌نشده‌ای وجود ندارد"); return; }
+      let unsettled = matches.filter((m) => !m.settled && ((m.deviceCost || 0) > 0 || (m.items || []).length > 0));
+      if (unsettled.length === 0) { App.toast("بازی تسویه‌نشده‌ای وجود ندارد"); return { success: false }; }
 
-    let settledCount = 0, skippedCount = 0;
-    for (let m of unsettled) {
-      let totalItems = (m.items || []).reduce((s, i) => s + (i.price * i.qty), 0);
-      let total = (m.deviceCost || 0) + totalItems;
-      if (total <= 0) continue;
+      let settledCount = 0, skippedCount = 0;
+      for (let m of unsettled) {
+        let totalItems = (m.items || []).reduce((s, i) => s + (i.price * i.qty), 0);
+        let total = (m.deviceCost || 0) + totalItems;
+        if (total <= 0) continue;
 
-      let loserId = m.winner ? (m.winner === m.playerA ? m.playerB : m.playerA) : (m.playerA || m.playerB);
-      if (!loserId) continue;
+        let loserId = m.winner ? (m.winner === m.playerA ? m.playerB : m.playerA) : (m.playerA || m.playerB);
+        if (!loserId) continue;
 
-      let payResult = await Utils.applyPayment(loserId, total, payType);
-      if (!payResult.success) { skippedCount++; continue; }
-      m.settled = true;
-      m.settlePayType = payType;
-      m.settleAmount = total;
-      m.settlerName = "تسویه خودکار";
-      m.settledAt = new Date().toISOString();
-      await DB.put("matches", m);
-      await DB.add("blockPayments", {
-        customerId: loserId, sessionId: null, matchId: m.id,
-        deviceId: m.deviceId || null, deviceType: "tournament", blockIndex: null,
-        amount: total, payType: payType, settlerName: "تسویه خودکار",
-        date: m.settledAt,
-      });
-      settledCount++;
-    }
+        let customer = await DB.get("customers", loserId);
+        if (!customer) { skippedCount++; continue; }
+        let payResult = Utils.computePaymentUpdate(customer, total, payType);
+        if (!payResult.success) { skippedCount++; continue; }
+        m.settled = true;
+        m.settlePayType = payResult.payType;
+        m.payBreakdown = payResult.payBreakdown;
+        m.settleAmount = total;
+        m.settlerName = "تسویه خودکار";
+        m.settledAt = new Date().toISOString();
 
-    await DB.logActivity("تسویه همه بازی‌ها", t.name + " — " + settledCount + " بازی | روش: " + payType);
-    App.closeModalForce();
-    App.toast(skippedCount > 0 ? (settledCount + " بازی تسویه شد، " + skippedCount + " بازی به‌دلیل کمبود موجودی کیف‌پول رد شد") : "همه بازی‌ها تسویه شد");
-    manageTournament(tournamentId);
+        await DB.runAtomic([
+          { store: "customers", type: "put", data: payResult.customer },
+          { store: "matches", type: "put", data: m },
+          { store: "blockPayments", type: "add", data: {
+            customerId: loserId, sessionId: null, matchId: m.id,
+            deviceId: m.deviceId || null, deviceType: "tournament", blockIndex: null,
+            amount: total, payType: payResult.payType, payBreakdown: payResult.payBreakdown, settlerName: "تسویه خودکار",
+            date: m.settledAt,
+          } },
+        ]);
+        settledCount++;
+      }
+
+      await DB.logActivity("تسویه همه بازی‌ها", t.name + " — " + settledCount + " بازی | روش: " + payType);
+      App.closeModalForce();
+      App.toast(skippedCount > 0 ? (settledCount + " بازی تسویه شد، " + skippedCount + " بازی به‌دلیل کمبود موجودی کیف‌پول رد شد") : "همه بازی‌ها تسویه شد");
+      manageTournament(tournamentId);
+      return { success: true };
+    });
   }
 
   async function payoutPrize(tournamentId, place) {
@@ -1248,37 +1300,39 @@ const Tournaments = (function () {
   }
 
   async function confirmPayoutPrize(tournamentId, place) {
-    let t = await DB.get("tournaments", tournamentId);
-    if (!t) return;
-    let prize = (t.prizes || []).find((p) => p.place === place);
-    if (!prize) { App.toast("جایزه یافت نشد"); return; }
-    let existing = (await DB.getAll("prizePayouts")).find((p) => p.tournamentId === tournamentId && p.place === place);
-    if (existing) { App.toast("این جایزه قبلاً پرداخت شده است"); return; }
+    await Utils.guardDoubleClick(async () => {
+      let t = await DB.get("tournaments", tournamentId);
+      if (!t) return { success: false };
+      let prize = (t.prizes || []).find((p) => p.place === place);
+      if (!prize) { App.toast("جایزه یافت نشد"); return { success: false }; }
+      let existing = (await DB.getAll("prizePayouts")).find((p) => p.tournamentId === tournamentId && p.place === place);
+      if (existing) { App.toast("این جایزه قبلاً پرداخت شده است"); return { success: false }; }
 
-    let winnerId = parseInt(document.getElementById("prizeWinnerId").value) || 0;
-    let method = document.getElementById("prizePayoutMethod").value;
-    if (!winnerId) { App.toast("برنده را انتخاب کنید"); return; }
+      let winnerId = parseInt(document.getElementById("prizeWinnerId").value) || 0;
+      let method = document.getElementById("prizePayoutMethod").value;
+      if (!winnerId) { App.toast("برنده را انتخاب کنید"); return { success: false }; }
 
-    // A cash/card payout is money leaving the till (like a purchase); crediting
-    // the wallet instead just moves it onto the customer's account, so it is
-    // recorded but doesn't reduce the day's cash reconciliation total.
-    if (method === "wallet") {
-      let customer = await DB.get("customers", winnerId);
-      if (!customer) { App.toast("مشتری یافت نشد"); return; }
-      customer.wallet = (customer.wallet || 0) + prize.amount;
-      await DB.put("customers", customer);
-    }
+      // A cash/card payout is money leaving the till (like a purchase); crediting
+      // the wallet instead just moves it onto the customer's account, so it is
+      // recorded but doesn't reduce the day's cash reconciliation total.
+      let payoutRecord = { tournamentId, place, customerId: winnerId, amount: prize.amount, payType: method === "wallet" ? "wallet" : method, date: new Date().toISOString() };
+      let ops = [];
+      if (method === "wallet") {
+        let customer = await DB.get("customers", winnerId);
+        if (!customer) { App.toast("مشتری یافت نشد"); return { success: false }; }
+        customer.wallet = (customer.wallet || 0) + prize.amount;
+        ops.push({ store: "customers", type: "put", data: customer });
+      }
+      ops.push({ store: "prizePayouts", type: "add", data: payoutRecord });
 
-    await DB.add("prizePayouts", {
-      tournamentId, place, customerId: winnerId,
-      amount: prize.amount, payType: method === "wallet" ? "wallet" : method,
-      date: new Date().toISOString(),
+      await DB.runAtomic(ops);
+
+      await DB.logActivity("پرداخت جایزه مسابقه", t.name + " — " + (prize.label || ('جایگاه ' + place)) + " — " + Utils.formatCurrency(prize.amount));
+      App.closeModalForce();
+      App.toast("جایزه پرداخت شد");
+      manageTournament(tournamentId);
+      return { success: true };
     });
-
-    await DB.logActivity("پرداخت جایزه مسابقه", t.name + " — " + (prize.label || ('جایگاه ' + place)) + " — " + Utils.formatCurrency(prize.amount));
-    App.closeModalForce();
-    App.toast("جایزه پرداخت شد");
-    manageTournament(tournamentId);
   }
 
   function renderAccounting(tournament, matches, customers, prizePayouts) {

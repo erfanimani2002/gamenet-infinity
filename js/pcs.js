@@ -128,13 +128,14 @@ const PCs = (function () {
     updateSelectedIds();
   }
 
-  function updateSelectedIds() {
+  async function updateSelectedIds() {
     let el = document.getElementById("pcSelectedIds");
     if (!el) return;
     if (selectedIds.length === 0) {
       el.innerHTML = '<span class="text-muted">انتخاب نشده</span>';
     } else {
-      el.innerHTML = selectedIds.map((id) => `<span class="status-badge">#${id}</span>`).join(" ");
+      let customers = await DB.getAll("customers");
+      el.innerHTML = selectedIds.map((id) => { let c = customers.find((cu) => cu.id === id); let label = c ? (c.displayId || c.id) : id; return `<span class="status-badge">#${label}</span>`; }).join(" ");
     }
   }
 
@@ -148,7 +149,7 @@ const PCs = (function () {
 
     let session = {
       deviceId, deviceType: "pc", ids: [...selectedIds], controllerCount: 1,
-      timeBlocks: [{ startTime: new Date().toISOString(), endTime: null, rate: 0, price: 0 }],
+      timeBlocks: [{ startTime: new Date().toISOString(), endTime: null, rate: 0, deviceType: "pc", price: 0 }],
       items: [], status: "active", createdAt: new Date().toISOString(),
     };
 
@@ -210,7 +211,8 @@ const PCs = (function () {
 
       session.status = "settled";
       session.settledAt = new Date().toISOString();
-      session.settlePayType = payType;
+      session.settlePayType = payResult.payType;
+      session.payBreakdown = payResult.payBreakdown;
       session.settleAmount = total;
       session.gameAmount = gameAmount;
       session.settlerName = settlerName;
@@ -276,7 +278,7 @@ const PCs = (function () {
     if (!item) return;
     if (!item.unlimited && item.stock <= 0) { App.toast("موجودی تمام شده"); return; }
 
-    session.items.push({ name: item.name, price: item.price, qty: 1, type: "cafe" });
+    session.items.push({ itemId, name: item.name, price: item.price, qty: 1, type: "cafe" });
     if (!item.unlimited) { item.stock--; await DB.put("cafeItems", item); }
     await DB.put("sessions", session);
     await DB.logActivity("افزودن آیتم به پی‌سی", item.name + " به سشن #" + session.id);
@@ -290,10 +292,11 @@ const PCs = (function () {
     let session = sessions.find((s) => s.deviceId === deviceId && s.status === "active");
     if (!session) return;
 
-    // Restore stock for cafe items
+    // Restore stock for cafe items (by itemId when present, else name).
+    let cafeItems = await DB.getAll("cafeItems");
     for (let it of (session.items || [])) {
       if (it.type === "cafe") {
-        let cafeItem = (await DB.getAll("cafeItems")).find((ci) => ci.name === it.name);
+        let cafeItem = it.itemId != null ? cafeItems.find((ci) => ci.id === it.itemId) : cafeItems.find((ci) => ci.name === it.name);
         if (cafeItem && !cafeItem.unlimited) { cafeItem.stock += (it.qty || 1); await DB.put("cafeItems", cafeItem); }
       }
     }
@@ -308,7 +311,7 @@ const PCs = (function () {
       let bp = allBp.find((r) => r.sessionId === session.id && r.blockIndex === i);
       let payerId = bp ? bp.customerId : (session.ids && session.ids[0]);
       if (payerId) {
-        await Reports.reversePayment(payerId, b.price || 0, b.settlePayType);
+        await Reports.reversePayment(payerId, b.price || 0, b.settlePayType, bp ? bp.payBreakdown : b.payBreakdown);
       }
       if (bp) await DB.remove("blockPayments", bp.id);
     }

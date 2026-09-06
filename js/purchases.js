@@ -107,6 +107,9 @@ const Purchases = (function () {
     let payType = document.getElementById("purPayType").value;
     let thirdParty = document.getElementById("purThirdParty")?.value.trim() || "";
     if (amount <= 0) { App.toast("مبلغ نامعتبر"); return; }
+    // TODO(fridge stock): a "fridge" purchase currently just records the expense.
+    // It should optionally let the user pick a cafe item to increment inventory,
+    // but that UI is deferred — we deliberately do NOT fake/auto-increment stock.
     await DB.add("purchases", { category, description, amount, paymentType: payType, thirdParty, date: new Date().toISOString(), settled: false });
     await DB.logActivity("ثبت خرید", description + " - " + Utils.formatCurrency(amount));
     App.closeModalForce(); App.toast("خرید ثبت شد"); refresh();

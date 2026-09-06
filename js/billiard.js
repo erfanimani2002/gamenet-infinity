@@ -126,7 +126,7 @@ const Billiard = (function () {
   function filterCustomers() { let q = document.getElementById("bSearch").value.toLowerCase(); document.querySelectorAll(".customer-pick").forEach((r) => { r.style.display = r.dataset.search.includes(q) ? "flex" : "none"; }); }
   function pickCustomer(id) { if (!selectedIds.includes(id)) selectedIds.push(id); updateSelectedIds(); }
   function removeSelectedId(id) { selectedIds = selectedIds.filter((i) => i !== id); updateSelectedIds(); }
-  function updateSelectedIds() { let el = document.getElementById("bSelectedIds"); if (!el) return; el.innerHTML = selectedIds.length === 0 ? '<span class="text-muted">هیچ شناسه‌ای</span>' : selectedIds.map((id) => `<span class="status-badge" style="margin:2px;">#${id} <button onclick="Billiard.removeSelectedId(${id})" style="background:none;border:none;cursor:pointer;color:red;">×</button></span>`).join(""); }
+  async function updateSelectedIds() { let el = document.getElementById("bSelectedIds"); if (!el) return; if (selectedIds.length === 0) { el.innerHTML = '<span class="text-muted">هیچ شناسه‌ای</span>'; return; } let customers = await DB.getAll("customers"); el.innerHTML = selectedIds.map((id) => { let c = customers.find((cu) => cu.id === id); let label = c ? (c.displayId || c.id) : id; return `<span class="status-badge" style="margin:2px;">#${label} <button onclick="Billiard.removeSelectedId(${id})" style="background:none;border:none;cursor:pointer;color:red;">×</button></span>`; }).join(""); }
 
   function parseTimeInput(timeInput) {
     let now = new Date();
@@ -153,7 +153,7 @@ const Billiard = (function () {
     let timeInput = document.getElementById("bStartTime").value;
     if (timeInput) { startTime = parseTimeInput(timeInput); }
 
-    let session = { deviceId, deviceType: "billiard", ids: [...selectedIds], controllerCount: stickCount, timeBlocks: [{ startTime: startTime.toISOString(), endTime: null, rate, controllerCount: stickCount, price: 0 }], items: [], status: "active", createdAt: startTime.toISOString() };
+    let session = { deviceId, deviceType: "billiard", ids: [...selectedIds], controllerCount: stickCount, timeBlocks: [{ startTime: startTime.toISOString(), endTime: null, rate, controllerCount: stickCount, deviceType: "billiard", price: 0 }], items: [], status: "active", createdAt: startTime.toISOString() };
     await DB.add("sessions", session);
     await DB.put("devices", { ...await DB.get("devices", deviceId), status: "busy" });
     await DB.logActivity("شروع سشن بیلیارد", "میز #" + deviceId + " | " + (stickCount === 4 ? "چهارچوب" : "دوچوب") + " | " + selectedIds.map((i) => "#" + i).join(", "));
@@ -172,7 +172,7 @@ const Billiard = (function () {
 
     let pricing = await DB.getSetting("pricing", {});
     let rate = (pricing.billiardRates || {})[session.controllerCount] || 8000;
-    session.timeBlocks.push({ startTime: new Date().toISOString(), endTime: null, rate, controllerCount: session.controllerCount, price: 0 });
+    session.timeBlocks.push({ startTime: new Date().toISOString(), endTime: null, rate, controllerCount: session.controllerCount, deviceType: session.deviceType || "billiard", price: 0 });
     await DB.put("sessions", session);
     await DB.logActivity("شروع بلوک بیلیارد", "سشن #" + session.id);
     refresh();
@@ -253,7 +253,8 @@ const Billiard = (function () {
         return { success: false };
       }
       block.settled = true;
-      block.settlePayType = payType;
+      block.settlePayType = payResult.payType;
+      block.payBreakdown = payResult.payBreakdown;
       block.settlerName = settlerName;
       block.settledAt = new Date().toISOString();
 
@@ -262,12 +263,12 @@ const Billiard = (function () {
         { store: "sessions", type: "put", data: session },
         { store: "blockPayments", type: "add", data: {
           customerId: payerId, sessionId: session.id, deviceId,
-          deviceType: session.deviceType, blockIndex,
-          amount: block.price, payType, settlerName,
+          deviceType: block.deviceType || session.deviceType, blockIndex,
+          amount: block.price, payType: payResult.payType, payBreakdown: payResult.payBreakdown, settlerName,
           date: new Date().toISOString()
         } },
       ]);
-      await DB.logActivity("تسویه بلوک بیلیارد", "سشن #" + session.id + " | بلوک " + (blockIndex + 1) + " | " + Utils.formatCurrency(block.price) + " | " + payType + " | " + settlerName);
+      await DB.logActivity("تسویه بلوک بیلیارد", "سشن #" + session.id + " | بلوک " + (blockIndex + 1) + " | " + Utils.formatCurrency(block.price) + " | " + payResult.payType + " | " + settlerName);
       App.toast("بلوک تسویه شد");
       settleBlock(deviceId);
       return { success: true };
@@ -310,22 +311,42 @@ const Billiard = (function () {
       <div class="form-group"><label>روش پرداخت</label><select id="settlePayType"><option value="wallet">کیف‌پول</option><option value="debt">بدهکاری</option><option value="cash">نقدی</option><option value="card">کارتی</option></select></div>
       <div class="form-group"><label>تسویه‌کننده</label>${settlerHtml}</div>
       <div class="modal-actions">
-        <button class="btn btn-success" onclick="Billiard.confirmSettleSession(${deviceId}, ${total}, ${discount})">تسویه</button>
+        <button class="btn btn-success" onclick="Billiard.confirmSettleSession(${deviceId})">تسویه</button>
         <button class="btn btn-outline" onclick="App.closeModalForce()">انصراف</button>
       </div>
     `);
   }
 
-  async function confirmSettleSession(deviceId, total, discount) {
+  async function confirmSettleSession(deviceId) {
     await Utils.guardDoubleClick(async () => {
       let payerId = parseInt(document.getElementById("payerId").value) || 0;
       let payType = document.getElementById("settlePayType").value;
       let settlerName = Utils.getSettlerName();
-      let finalAmount = total - (discount || 0);
 
       let sessions = await DB.getAll("sessions");
       let session = sessions.find((s) => s.deviceId === deviceId && s.status === "active");
       if (!session) return { success: false };
+
+      // Recompute from the current session instead of trusting baked-in totals.
+      let lastBlock = session.timeBlocks[session.timeBlocks.length - 1];
+      if (lastBlock && !lastBlock.endTime) {
+        lastBlock.endTime = new Date().toISOString();
+        let hours = (new Date(lastBlock.endTime) - new Date(lastBlock.startTime)) / 3600000;
+        let pricing = await DB.getSetting("pricing", {});
+        lastBlock.price = Utils.roundPrice(hours * lastBlock.rate, pricing.roundingUnit || 1000);
+      }
+
+      let unsettledBlocks = session.timeBlocks.filter((b) => !b.settled);
+      let blockTotal = unsettledBlocks.reduce((s, b) => s + (b.price || 0), 0);
+      let itemsTotal = (session.items || []).reduce((s, i) => s + (i.price * i.qty), 0);
+      let gross = blockTotal + itemsTotal;
+
+      let discount = 0;
+      if (session.ids && session.ids.length > 0) {
+        let mc = await DB.get("customers", session.ids[0]);
+        if (mc && mc.discount) discount = Math.round(gross * mc.discount / 100);
+      }
+      let finalAmount = Math.max(0, gross - discount);
 
       let customer = await DB.get("customers", payerId);
       let payResult = Utils.computePaymentUpdate(customer, finalAmount, payType);
@@ -333,7 +354,21 @@ const Billiard = (function () {
         App.toast(payResult.reason === "insufficient_wallet" ? "موجودی کیف‌پول کافی نیست" : "پرداخت ناموفق بود");
         return { success: false };
       }
-      session.status = "settled"; session.settledAt = new Date().toISOString(); session.settlePayType = payType; session.settleAmount = finalAmount; session.discount = discount || 0; session.settlerName = settlerName; session.settlePayerId = payerId;
+
+      let byDevice = { console: 0, billiard: 0, pc: 0 };
+      unsettledBlocks.forEach((b) => { byDevice[b.deviceType || session.deviceType] = (byDevice[b.deviceType || session.deviceType] || 0) + (b.price || 0); });
+      byDevice[session.deviceType] = (byDevice[session.deviceType] || 0) + itemsTotal;
+      if (gross > 0) {
+        let factor = finalAmount / gross;
+        byDevice.console = Math.round(byDevice.console * factor);
+        byDevice.billiard = Math.round(byDevice.billiard * factor);
+        byDevice.pc = Math.round(byDevice.pc * factor);
+        let sum = byDevice.console + byDevice.billiard + byDevice.pc;
+        let diff = finalAmount - sum;
+        if (diff !== 0) byDevice[session.deviceType] = (byDevice[session.deviceType] || 0) + diff;
+      }
+
+      session.status = "settled"; session.settledAt = new Date().toISOString(); session.settlePayType = payResult.payType; session.payBreakdown = payResult.payBreakdown; session.settleAmount = finalAmount; session.discount = discount || 0; session.settleBreakdown = byDevice; session.settlerName = settlerName; session.settlePayerId = payerId;
       session.timeBlocks.forEach((b) => { b.settled = true; });
 
       await DB.runAtomic([
@@ -341,7 +376,7 @@ const Billiard = (function () {
         { store: "sessions", type: "put", data: session },
       ]);
       await DB.put("devices", { ...await DB.get("devices", deviceId), status: "free" });
-      await DB.logActivity("تسویه کل بیلیارد", "سشن #" + session.id + " | " + Utils.formatCurrency(finalAmount) + " | " + payType + " | " + settlerName);
+      await DB.logActivity("تسویه کل بیلیارد", "سشن #" + session.id + " | " + Utils.formatCurrency(finalAmount) + " | " + payResult.payType + " | " + settlerName);
       App.stopTimer("timer-billiard-" + deviceId); App.closeModalForce(); App.toast("تسویه شد"); refresh();
       return { success: true };
     });
@@ -395,10 +430,10 @@ const Billiard = (function () {
     let item;
     if (source === "cafe") {
       item = await DB.get("cafeItems", itemId);
-      if (item) { if (!item.unlimited && item.stock <= 0) { App.toast("موجودی تمام"); return; } session.items.push({ name: item.name, price: item.price, qty: 1, type: "cafe" }); if (!item.unlimited) { item.stock--; await DB.put("cafeItems", item); } }
+      if (item) { if (!item.unlimited && item.stock <= 0) { App.toast("موجودی تمام"); return; } session.items.push({ itemId, name: item.name, price: item.price, qty: 1, type: "cafe" }); if (!item.unlimited) { item.stock--; await DB.put("cafeItems", item); } }
     } else {
       item = await DB.get("penaltyItems", itemId);
-      if (item) { let price = item.type === "penalty" ? item.amount : -item.amount; session.items.push({ name: item.name, price, qty: 1, type: item.type }); }
+      if (item) { let price = item.type === "penalty" ? item.amount : -item.amount; session.items.push({ itemId, name: item.name, price, qty: 1, type: item.type }); }
     }
     if (item) { await DB.put("sessions", session); await DB.logActivity("افزودن آیتم به بیلیارد", item.name + " به سشن #" + session.id + " | " + Utils.formatCurrency(item.price)); App.toast("اضافه شد"); showSessionDetail(deviceId); }
   }
@@ -436,7 +471,7 @@ const Billiard = (function () {
     // the destination type (see Utils.resolveTransferRate).
     let { rate: newRate, controllerCount: newControllerCount } = Utils.resolveTransferRate(pricing, targetDevice.type, session.controllerCount);
     session.deviceId = targetId; session.deviceType = targetDevice.type; session.controllerCount = newControllerCount;
-    session.timeBlocks.push({ startTime: new Date().toISOString(), endTime: null, rate: newRate, controllerCount: newControllerCount, price: 0 });
+    session.timeBlocks.push({ startTime: new Date().toISOString(), endTime: null, rate: newRate, controllerCount: newControllerCount, deviceType: targetDevice.type, price: 0 });
     let oldDevice = await DB.get("devices", deviceId);
     await DB.put("sessions", session);
     await DB.put("devices", { ...oldDevice, status: "free" });
@@ -451,10 +486,11 @@ const Billiard = (function () {
     let session = sessions.find((s) => s.deviceId === deviceId && s.status === "active");
     if (!session) return;
 
-    // Restore stock for cafe items
+    // Restore stock for cafe items (by itemId when present, else name).
+    let cafeItems = await DB.getAll("cafeItems");
     for (let it of (session.items || [])) {
       if (it.type === "cafe") {
-        let cafeItem = (await DB.getAll("cafeItems")).find((ci) => ci.name === it.name);
+        let cafeItem = it.itemId != null ? cafeItems.find((ci) => ci.id === it.itemId) : cafeItems.find((ci) => ci.name === it.name);
         if (cafeItem && !cafeItem.unlimited) { cafeItem.stock += (it.qty || 1); await DB.put("cafeItems", cafeItem); }
       }
     }
@@ -468,7 +504,7 @@ const Billiard = (function () {
       let bp = allBp.find((r) => r.sessionId === session.id && r.blockIndex === i);
       let payerId = bp ? bp.customerId : (session.ids && session.ids[0]);
       if (payerId) {
-        await Reports.reversePayment(payerId, b.price || 0, b.settlePayType);
+        await Reports.reversePayment(payerId, b.price || 0, b.settlePayType, bp ? bp.payBreakdown : b.payBreakdown);
       }
       if (bp) await DB.remove("blockPayments", bp.id);
     }

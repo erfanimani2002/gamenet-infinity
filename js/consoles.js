@@ -173,16 +173,19 @@ const Consoles = (function () {
     updateSelectedIds();
   }
 
-  function updateSelectedIds() {
+  async function updateSelectedIds() {
     let el = document.getElementById("sSelectedIds");
     if (!el) return;
     if (selectedIds.length === 0) {
       el.innerHTML = '<span class="text-muted">هیچ شناسه‌ای انتخاب نشده</span>';
-    } else {
-      el.innerHTML = selectedIds.map((id) =>
-        `<span class="status-badge" style="margin:2px;">#${id} <button onclick="Consoles.removeSelectedId(${id})" style="background:none;border:none;cursor:pointer;color:red;">×</button></span>`
-      ).join("");
+      return;
     }
+    let customers = await DB.getAll("customers");
+    el.innerHTML = selectedIds.map((id) => {
+      let c = customers.find((cu) => cu.id === id);
+      let label = c ? (c.displayId || c.id) : id;
+      return `<span class="status-badge" style="margin:2px;">#${label} <button onclick="Consoles.removeSelectedId(${id})" style="background:none;border:none;cursor:pointer;color:red;">×</button></span>`;
+    }).join("");
   }
 
   function parseTimeInput(timeInput) {
@@ -216,7 +219,7 @@ const Consoles = (function () {
 
     let session = {
       deviceId, deviceType: "console", ids: [...selectedIds], controllerCount,
-      timeBlocks: [{ startTime: startTime.toISOString(), endTime: null, rate, controllerCount, price: 0 }],
+      timeBlocks: [{ startTime: startTime.toISOString(), endTime: null, rate, controllerCount, deviceType: "console", price: 0 }],
       items: [], status: "active", createdAt: startTime.toISOString(),
     };
 
@@ -244,7 +247,7 @@ const Consoles = (function () {
     let rates = pricing.consoleRates || {};
     let rate = rates[session.controllerCount] || rates[1];
 
-    session.timeBlocks.push({ startTime: new Date().toISOString(), endTime: null, rate, controllerCount: session.controllerCount, price: 0 });
+    session.timeBlocks.push({ startTime: new Date().toISOString(), endTime: null, rate, controllerCount: session.controllerCount, deviceType: session.deviceType || "console", price: 0 });
     await DB.put("sessions", session);
     await DB.logActivity("شروع بلوک کنسول", "سشن #" + session.id);
     refresh();
@@ -327,7 +330,8 @@ const Consoles = (function () {
         return { success: false };
       }
       block.settled = true;
-      block.settlePayType = payType;
+      block.settlePayType = payResult.payType;
+      block.payBreakdown = payResult.payBreakdown;
       block.settlerName = settlerName;
       block.settledAt = new Date().toISOString();
 
@@ -339,12 +343,12 @@ const Consoles = (function () {
         { store: "sessions", type: "put", data: session },
         { store: "blockPayments", type: "add", data: {
           customerId: payerId, sessionId: session.id, deviceId,
-          deviceType: session.deviceType, blockIndex,
-          amount: block.price, payType, settlerName,
+          deviceType: block.deviceType || session.deviceType, blockIndex,
+          amount: block.price, payType: payResult.payType, payBreakdown: payResult.payBreakdown, settlerName,
           date: new Date().toISOString()
         } },
       ]);
-      await DB.logActivity("تسویه بلوک کنسول", "سشن #" + session.id + " | بلوک " + (blockIndex + 1) + " | " + Utils.formatCurrency(block.price) + " | " + payType + " | " + settlerName);
+      await DB.logActivity("تسویه بلوک کنسول", "سشن #" + session.id + " | بلوک " + (blockIndex + 1) + " | " + Utils.formatCurrency(block.price) + " | " + payResult.payType + " | " + settlerName);
       App.toast("بلوک تسویه شد");
       settleBlock(deviceId);
       return { success: true };
@@ -392,22 +396,45 @@ const Consoles = (function () {
       </div>
       <div class="form-group"><label>کاربر تسویه‌کننده</label>${settlerHtml}</div>
       <div class="modal-actions">
-        <button class="btn btn-success" onclick="Consoles.confirmSettleSession(${deviceId}, ${total}, ${discount})">تسویه</button>
+        <button class="btn btn-success" onclick="Consoles.confirmSettleSession(${deviceId})">تسویه</button>
         <button class="btn btn-outline" onclick="App.closeModalForce()">انصراف</button>
       </div>
     `);
   }
 
-  async function confirmSettleSession(deviceId, total, discount) {
+  async function confirmSettleSession(deviceId) {
     await Utils.guardDoubleClick(async () => {
       let payerId = parseInt(document.getElementById("payerId").value) || 0;
       let payType = document.getElementById("settlePayType").value;
       let settlerName = Utils.getSettlerName();
-      let finalAmount = total - (discount || 0);
 
       let sessions = await DB.getAll("sessions");
       let session = sessions.find((s) => s.deviceId === deviceId && s.status === "active");
       if (!session) return { success: false };
+
+      // Recompute the payable amount from the CURRENT session instead of trusting
+      // the totals baked into the modal (which may have gone stale, e.g. after
+      // the 23:35 boundary or an extra item was added).
+      let lastBlock = session.timeBlocks[session.timeBlocks.length - 1];
+      if (lastBlock && !lastBlock.endTime) {
+        lastBlock.endTime = new Date().toISOString();
+        let hours = (new Date(lastBlock.endTime) - new Date(lastBlock.startTime)) / 3600000;
+        let pricing = await DB.getSetting("pricing", {});
+        lastBlock.price = Utils.roundPrice(hours * lastBlock.rate, pricing.roundingUnit || 1000);
+      }
+
+      let unsettledBlocks = session.timeBlocks.filter((b) => !b.settled);
+      let blockTotal = unsettledBlocks.reduce((s, b) => s + (b.price || 0), 0);
+      let itemsTotal = (session.items || []).reduce((s, i) => s + (i.price * i.qty), 0);
+      let gross = blockTotal + itemsTotal;
+
+      let discount = 0;
+      if (session.ids && session.ids.length > 0) {
+        let mainCustomer = await DB.get("customers", session.ids[0]);
+        if (mainCustomer && mainCustomer.discount) discount = Math.round(gross * mainCustomer.discount / 100);
+      }
+      // Floor at 0 so discount/credit items can never "credit" the wallet.
+      let finalAmount = Math.max(0, gross - discount);
 
       let customer = await DB.get("customers", payerId);
       let payResult = Utils.computePaymentUpdate(customer, finalAmount, payType);
@@ -415,11 +442,30 @@ const Consoles = (function () {
         App.toast(payResult.reason === "insufficient_wallet" ? "موجودی کیف‌پول کافی نیست" : "پرداخت ناموفق بود");
         return { success: false };
       }
+
+      // Attribute the settle across the devices the session's blocks actually ran
+      // on (see D), so a transfer doesn't dump already-priced console blocks into
+      // billiard. Items are attributed to the final device.
+      let byDevice = { console: 0, billiard: 0, pc: 0 };
+      unsettledBlocks.forEach((b) => { byDevice[b.deviceType || session.deviceType] = (byDevice[b.deviceType || session.deviceType] || 0) + (b.price || 0); });
+      byDevice[session.deviceType] = (byDevice[session.deviceType] || 0) + itemsTotal;
+      if (gross > 0) {
+        let factor = finalAmount / gross;
+        byDevice.console = Math.round(byDevice.console * factor);
+        byDevice.billiard = Math.round(byDevice.billiard * factor);
+        byDevice.pc = Math.round(byDevice.pc * factor);
+        let sum = byDevice.console + byDevice.billiard + byDevice.pc;
+        let diff = finalAmount - sum;
+        if (diff !== 0) byDevice[session.deviceType] = (byDevice[session.deviceType] || 0) + diff;
+      }
+
       session.status = "settled";
       session.settledAt = new Date().toISOString();
-      session.settlePayType = payType;
+      session.settlePayType = payResult.payType;
+      session.payBreakdown = payResult.payBreakdown;
       session.settleAmount = finalAmount;
       session.discount = discount || 0;
+      session.settleBreakdown = byDevice;
       session.settlerName = settlerName;
       session.settlePayerId = payerId;
       session.timeBlocks.forEach((b) => { b.settled = true; });
@@ -429,7 +475,7 @@ const Consoles = (function () {
         { store: "sessions", type: "put", data: session },
       ]);
       await DB.put("devices", { ...await DB.get("devices", deviceId), status: "free" });
-      await DB.logActivity("تسویه کل سشن کنسول", "سشن #" + session.id + " | مبلغ: " + Utils.formatCurrency(finalAmount) + " | " + payType + " | " + settlerName);
+      await DB.logActivity("تسویه کل سشن کنسول", "سشن #" + session.id + " | مبلغ: " + Utils.formatCurrency(finalAmount) + " | " + payResult.payType + " | " + settlerName);
       App.stopTimer("timer-" + deviceId);
       App.closeModalForce();
       App.toast("تسویه انجام شد");
@@ -509,14 +555,14 @@ const Consoles = (function () {
       item = await DB.get("cafeItems", itemId);
       if (item) {
         if (!item.unlimited && item.stock <= 0) { App.toast("موجودی تمام شده"); return; }
-        session.items.push({ name: item.name, price: item.price, qty: 1, type: "cafe" });
+        session.items.push({ itemId, name: item.name, price: item.price, qty: 1, type: "cafe" });
         if (!item.unlimited) { item.stock--; await DB.put("cafeItems", item); }
       }
     } else {
       item = await DB.get("penaltyItems", itemId);
       if (item) {
         let price = item.type === "penalty" ? item.amount : -item.amount;
-        session.items.push({ name: item.name, price, qty: 1, type: item.type });
+        session.items.push({ itemId, name: item.name, price, qty: 1, type: item.type });
       }
     }
     if (item) {
@@ -569,7 +615,7 @@ const Consoles = (function () {
     session.deviceId = targetId;
     session.deviceType = targetDevice.type;
     session.controllerCount = newControllerCount;
-    session.timeBlocks.push({ startTime: new Date().toISOString(), endTime: null, rate: newRate, controllerCount: newControllerCount, price: 0 });
+    session.timeBlocks.push({ startTime: new Date().toISOString(), endTime: null, rate: newRate, controllerCount: newControllerCount, deviceType: targetDevice.type, price: 0 });
 
     let oldDevice = await DB.get("devices", deviceId);
     await DB.put("sessions", session);
@@ -588,10 +634,11 @@ const Consoles = (function () {
     let session = sessions.find((s) => s.deviceId === deviceId && s.status === "active");
     if (!session) return;
 
-    // Restore stock for cafe items
+    // Restore stock for cafe items (by itemId when present, else name).
+    let cafeItems = await DB.getAll("cafeItems");
     for (let it of (session.items || [])) {
       if (it.type === "cafe") {
-        let cafeItem = (await DB.getAll("cafeItems")).find((ci) => ci.name === it.name);
+        let cafeItem = it.itemId != null ? cafeItems.find((ci) => ci.id === it.itemId) : cafeItems.find((ci) => ci.name === it.name);
         if (cafeItem && !cafeItem.unlimited) { cafeItem.stock += (it.qty || 1); await DB.put("cafeItems", cafeItem); }
       }
     }
@@ -605,7 +652,7 @@ const Consoles = (function () {
       let bp = allBp.find((r) => r.sessionId === session.id && r.blockIndex === i);
       let payerId = bp ? bp.customerId : (session.ids && session.ids[0]);
       if (payerId) {
-        await Reports.reversePayment(payerId, b.price || 0, b.settlePayType);
+        await Reports.reversePayment(payerId, b.price || 0, b.settlePayType, bp ? bp.payBreakdown : b.payBreakdown);
       }
       if (bp) await DB.remove("blockPayments", bp.id);
     }
