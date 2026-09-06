@@ -775,11 +775,15 @@ const Reports = (function () {
         // Proportionally scale the device-type breakdown when the amount changes.
         if (session.settleBreakdown && oldAmount > 0 && newAmount !== oldAmount) {
           let ratio = newAmount / oldAmount;
+          let sb = session.settleBreakdown;
           session.settleBreakdown = {
-            console: Math.round((session.settleBreakdown.console || 0) * ratio),
-            billiard: Math.round((session.settleBreakdown.billiard || 0) * ratio),
-            pc: Math.round((session.settleBreakdown.pc || 0) * ratio),
+            console: Math.round((sb.console || 0) * ratio),
+            billiard: Math.round((sb.billiard || 0) * ratio),
+            pc: Math.round((sb.pc || 0) * ratio),
           };
+          let sum = session.settleBreakdown.console + session.settleBreakdown.billiard + session.settleBreakdown.pc;
+          let diff = newAmount - sum;
+          if (diff !== 0) session.settleBreakdown.console += diff;
         }
         await DB.put("sessions", session);
       }
@@ -819,17 +823,14 @@ const Reports = (function () {
           bp.payType = newPayType;
         }
         await DB.put("blockPayments", bp);
-        // Update the parent session's settleBreakdown proportionally.
+        // Update the parent session's settleBreakdown by the absolute difference.
         if (bp.sessionId && oldAmount !== newAmount) {
           let session = await DB.get("sessions", bp.sessionId);
-          if (session && session.settleBreakdown && oldAmount > 0) {
-            let ratio = newAmount / oldAmount;
-            session.settleBreakdown = {
-              console: Math.round((session.settleBreakdown.console || 0) * ratio),
-              billiard: Math.round((session.settleBreakdown.billiard || 0) * ratio),
-              pc: Math.round((session.settleBreakdown.pc || 0) * ratio),
-            };
-            session.settleAmount = (session.settleAmount || 0) + (newAmount - oldAmount);
+          if (session && session.settleBreakdown) {
+            let diff = newAmount - oldAmount;
+            let deviceType = bp.deviceType || session.deviceType;
+            session.settleBreakdown[deviceType] = (session.settleBreakdown[deviceType] || 0) + diff;
+            session.settleAmount = (session.settleAmount || 0) + diff;
             await DB.put("sessions", session);
           }
         }
@@ -888,12 +889,22 @@ const Reports = (function () {
         }
         // Restore cafe item stock for items attached to this session.
         await restoreCafeStock(session.items || []);
-        // Free the device so it can be used again.
+        // Remove associated blockPayments records to prevent double accounting.
+        let allBp = await DB.getAll("blockPayments");
+        let sessionBp = allBp.filter((bp) => bp.sessionId === session.id);
+        for (let bp of sessionBp) {
+          await DB.remove("blockPayments", bp.id);
+        }
+        // Free the device only if no active session is using it.
         if (session.deviceId) {
-          let device = await DB.get("devices", session.deviceId);
-          if (device && device.status !== "free") {
-            device.status = "free";
-            await DB.put("devices", device);
+          let sessions = await DB.getAll("sessions");
+          let activeOnDevice = sessions.find((s) => s.deviceId === session.deviceId && s.status === "active" && s.id !== session.id);
+          if (!activeOnDevice) {
+            let device = await DB.get("devices", session.deviceId);
+            if (device && device.status !== "free") {
+              device.status = "free";
+              await DB.put("devices", device);
+            }
           }
         }
         session.status = "deleted";

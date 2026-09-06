@@ -131,16 +131,16 @@ const AdminPanel = (function () {
   async function savePricing() {
     let pricing = {
       consoleRates: {
-        1: parseInt(document.getElementById("rate1").value) || 5000,
-        2: parseInt(document.getElementById("rate2").value) || 7000,
-        3: parseInt(document.getElementById("rate3").value) || 9000,
-        4: parseInt(document.getElementById("rate4").value) || 11000,
+        1: parseInt(document.getElementById("rate1").value) ?? 5000,
+        2: parseInt(document.getElementById("rate2").value) ?? 7000,
+        3: parseInt(document.getElementById("rate3").value) ?? 9000,
+        4: parseInt(document.getElementById("rate4").value) ?? 11000,
       },
       billiardRates: {
-        2: parseInt(document.getElementById("billiard2").value) || 8000,
-        4: parseInt(document.getElementById("billiard4").value) || 12000,
+        2: parseInt(document.getElementById("billiard2").value) ?? 8000,
+        4: parseInt(document.getElementById("billiard4").value) ?? 12000,
       },
-      roundingUnit: parseInt(document.getElementById("roundingUnit").value) || 1000,
+      roundingUnit: parseInt(document.getElementById("roundingUnit").value) ?? 1000,
     };
     await DB.setSetting("pricing", pricing);
     await DB.logActivity("ذخیره قیمت‌ها", "نرخ‌ها به‌روزرسانی شد");
@@ -245,9 +245,9 @@ const AdminPanel = (function () {
         let disc = tierDiscounts[key] || 0;
         tiers.push(`
           <tr>
-            <td>${cat.name} ${t + 1}</td>
+            <td>${Utils.escapeHtml(cat.name)} ${t + 1}</td>
             <td>${Utils.formatCurrency(threshold)}</td>
-            <td><input type="number" class="club-disc-input" data-key="${key}" value="${disc}" min="0" max="100" style="width:70px"></td>
+            <td><input type="number" class="club-disc-input" data-ci="${ci}" data-tier="${t}" value="${disc}" min="0" max="100" style="width:70px"></td>
           </tr>
         `);
       }
@@ -288,14 +288,10 @@ const AdminPanel = (function () {
 
   async function saveCustomerClub() {
     let club = await DB.getSetting("customerClub", { categories: [], tierDiscounts: {} });
-    let categories = club.categories || [];
-    let tierDiscounts = {};
+    let oldCategories = club.categories || [];
 
-    document.querySelectorAll(".club-disc-input").forEach((el) => {
-      tierDiscounts[el.dataset.key] = parseInt(el.value) || 0;
-    });
-
-    let newCategories = categories.map((cat, ci) => {
+    // Build new categories from form inputs.
+    let newCategories = oldCategories.map((cat, ci) => {
       let nameEl = document.querySelector(`.club-cat-name[data-ci="${ci}"]`);
       let tiersEl = document.querySelector(`.club-cat-tiers[data-ci="${ci}"]`);
       let baseEl = document.querySelector(`.club-cat-base[data-ci="${ci}"]`);
@@ -304,10 +300,24 @@ const AdminPanel = (function () {
       return {
         name: nameEl ? nameEl.value.trim() || cat.name : cat.name,
         color: colorEl ? colorEl.value : cat.color,
-        tiers: parseInt(tiersEl ? tiersEl.value : cat.tiers) || 10,
-        baseThreshold: parseInt(baseEl ? baseEl.value : cat.baseThreshold) || 0,
-        thresholdStep: parseInt(stepEl ? stepEl.value : cat.thresholdStep) || 0,
+        tiers: parseInt(tiersEl ? tiersEl.value : cat.tiers) ?? 10,
+        baseThreshold: parseInt(baseEl ? baseEl.value : cat.baseThreshold) ?? 0,
+        thresholdStep: parseInt(stepEl ? stepEl.value : cat.thresholdStep) ?? 0,
       };
+    });
+
+    // Remap tier discounts: each input's data-key uses the OLD category name,
+    // but we need to save under the NEW name (which may have changed).
+    let tierDiscounts = {};
+    document.querySelectorAll(".club-disc-input").forEach((el) => {
+      let ci = parseInt(el.dataset.ci);
+      let tierIndex = parseInt(el.dataset.tier);
+      let discount = parseInt(el.value) ?? 0;
+      let newCat = newCategories[ci];
+      if (newCat) {
+        let newKey = newCat.name + "_" + (tierIndex + 1);
+        tierDiscounts[newKey] = discount;
+      }
     });
 
     await DB.setSetting("customerClub", { categories: newCategories, tierDiscounts });

@@ -136,6 +136,10 @@ const Customers = (function () {
     if (!c) return;
     let payments = await DB.getByIndex("debtPayments", "by_customer", id);
     let charges = await DB.getByIndex("walletCharges", "by_customer", id);
+    let effectiveDiscount = await Utils.getEffectiveDiscount(c);
+    let clubSettings = await DB.getSetting("customerClub", { categories: [], tierDiscounts: {} });
+    let rank = CustomerClub.computeRank(c.totalPaid || 0, clubSettings.categories || []);
+    let rankLabel = rank ? rank.category + " " + rank.tier : "—";
 
     // Past settled sessions this customer attended (listed in `ids`) or paid
     // for (settlePayerId), most-recent first, capped to keep the modal tidy.
@@ -179,11 +183,11 @@ const Customers = (function () {
       </div>
       <div class="list-row">
         <span class="row-label">تخفیف</span>
-        <span class="row-value">${c.discount || 0}%</span>
+        <span class="row-value">${effectiveDiscount}%${effectiveDiscount !== (c.discount || 0) ? ' <span class="text-muted text-sm">(دستی: ' + (c.discount || 0) + '%)</span>' : ''}</span>
       </div>
       <div class="list-row">
         <span class="row-label">رتبه</span>
-        <span class="row-value">${c.rank || 0}</span>
+        <span class="row-value">${rankLabel}</span>
       </div>
       <div class="list-row">
         <span class="row-label">مجموع پرداختی</span>

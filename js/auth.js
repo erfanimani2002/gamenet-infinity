@@ -47,7 +47,7 @@ const Auth = (function () {
     // Admin sees everything EXCEPT the manager-only destinations (monthlyReport,
     // adminPanel) which app.js also gates by isManager().
     const adminAllowed = [
-      "consoles", "billiard", "pcs", "cafe", "customers", "debts",
+      "consoles", "billiard", "pcs", "cafe", "customers", "customerClub", "debts",
       "inventory", "penalties", "purchases", "staff", "activityLog",
       "backup", "instantReport", "reports", "games", "tournaments",
     ];

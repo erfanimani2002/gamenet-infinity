@@ -668,9 +668,9 @@ const Consoles = (function () {
         let c = customerChanges[payerId];
         if (c) {
           let amount = b.price || 0;
-          let payType = bp ? bp.payBreakdown : b.payBreakdown;
-          if (payType && typeof payType === "object") {
-            let w = payType.wallet || 0, d = payType.debt || 0, other = (payType.cash || 0) + (payType.card || 0);
+          let payBreakdown = bp ? bp.payBreakdown : b.payBreakdown;
+          if (payBreakdown && typeof payBreakdown === "object") {
+            let w = payBreakdown.wallet || 0, d = payBreakdown.debt || 0, other = (payBreakdown.cash || 0) + (payBreakdown.card || 0);
             if (w) { c.wallet = (c.wallet || 0) + w; c.totalPaid = Math.max(0, (c.totalPaid || 0) - w); }
             if (d) { c.debt = Math.max(0, (c.debt || 0) - d); }
             if (other) { c.totalPaid = Math.max(0, (c.totalPaid || 0) - other); }

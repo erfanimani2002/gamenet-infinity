@@ -13,7 +13,7 @@ const CustomerClub = (function () {
     for (let cat of categories) {
       for (let t = 0; t < (cat.tiers || 0); t++) {
         let threshold = (cat.baseThreshold || 0) + t * (cat.thresholdStep || 0);
-        if (totalPaid >= threshold) {
+        if (totalPaid >= threshold && (!best || threshold > best.threshold)) {
           best = { category: cat.name, tier: t + 1, color: cat.color, threshold };
         }
       }
@@ -57,6 +57,14 @@ const CustomerClub = (function () {
     return { count, lastVisit };
   }
 
+  function buildSessionStatsMap(customers, sessions) {
+    let map = {};
+    for (let c of customers) {
+      map[c.id] = getSessionStats(c.id, sessions);
+    }
+    return map;
+  }
+
   function renderCard(c, sessions, categories, tierDiscounts) {
     let rank = computeRank(c.totalPaid || 0, categories);
     let rankDiscount = getRankDiscount(rank, categories, tierDiscounts);
@@ -65,11 +73,11 @@ const CustomerClub = (function () {
     let interests = (c.tournamentInterests || []);
 
     let rankBadge = rank
-      ? `<span class="rank-badge" style="background:${rank.color};color:#fff">${rank.category} ${rank.tier}</span>`
+      ? `<span class="rank-badge" style="background:${Utils.escapeHtml(rank.color)};color:#fff">${Utils.escapeHtml(rank.category)} ${rank.tier}</span>`
       : `<span class="rank-badge rank-none">بدون رتبه</span>`;
 
     let interestChips = interests.length > 0
-      ? interests.map((i) => `<span class="interest-chip">${interestIcons[i] || ""} ${interestLabels[i] || i}</span>`).join("")
+      ? interests.map((i) => `<span class="interest-chip">${interestIcons[i] || ""} ${Utils.escapeHtml(interestLabels[i] || i)}</span>`).join("")
       : `<span class="interest-chip interest-empty">—</span>`;
 
     let lastVisitStr = ss.lastVisit ? Jalali.formatDate(new Date(ss.lastVisit)) : "—";
@@ -108,6 +116,7 @@ const CustomerClub = (function () {
 
     let stats = computeStats(customers, sessions);
     let dist = getCategoryDistribution(customers, categories);
+    let sessionStatsMap = buildSessionStatsMap(customers, sessions);
 
     let allInterests = ["billiard", "console", "cs"];
 
@@ -120,7 +129,7 @@ const CustomerClub = (function () {
       }
       if (currentRankFilter) {
         let rank = computeRank(c.totalPaid || 0, categories);
-        let rankName = rank ? rank.category : "";
+        let rankName = rank ? rank.category : "__none__";
         if (rankName !== currentRankFilter) return false;
       }
       if (currentInterestFilter) {
@@ -131,46 +140,38 @@ const CustomerClub = (function () {
 
     if (currentSort === "totalPaid") filtered.sort((a, b) => (b.totalPaid || 0) - (a.totalPaid || 0));
     else if (currentSort === "sessions") {
-      filtered.sort((a, b) => {
-        let sa = getSessionStats(a.id, sessions).count;
-        let sb = getSessionStats(b.id, sessions).count;
-        return sb - sa;
-      });
+      filtered.sort((a, b) => (sessionStatsMap[b.id]?.count || 0) - (sessionStatsMap[a.id]?.count || 0));
     } else if (currentSort === "lastVisit") {
-      filtered.sort((a, b) => {
-        let la = getSessionStats(a.id, sessions).lastVisit || "";
-        let lb = getSessionStats(b.id, sessions).lastVisit || "";
-        return lb.localeCompare(la);
-      });
+      filtered.sort((a, b) => (sessionStatsMap[b.id]?.lastVisit || "").localeCompare(sessionStatsMap[a.id]?.lastVisit || ""));
     } else if (currentSort === "newest") {
       filtered.sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""));
     } else if (currentSort === "name") {
       filtered.sort((a, b) => (a.firstName || "").localeCompare(b.firstName || ""));
     }
 
-    let rankOptions = categories.map((c) => `<option value="${c.name}" ${currentRankFilter === c.name ? "selected" : ""}>${c.name}</option>`).join("");
+    let rankOptions = categories.map((c) => `<option value="${Utils.escapeHtml(c.name)}" ${currentRankFilter === c.name ? "selected" : ""}>${Utils.escapeHtml(c.name)}</option>`).join("");
     let interestOptions = allInterests.map((i) => `<option value="${i}" ${currentInterestFilter === i ? "selected" : ""}>${interestLabels[i]}</option>`).join("");
 
     let cardsHtml = filtered.map((c) => renderCard(c, sessions, categories, tierDiscounts)).join("");
 
     let distHtml = Object.entries(dist).map(([name, count]) =>
-      `<div class="dist-bar"><span class="dist-label">${name}</span><div class="dist-track"><div class="dist-fill" style="width:${stats.totalCustomers > 0 ? Math.round(count / stats.totalCustomers * 100) : 0}%"></div></div><span class="dist-count">${count}</span></div>`
+      `<div class="dist-bar"><span class="dist-label">${Utils.escapeHtml(name)}</span><div class="dist-track"><div class="dist-fill" style="width:${stats.totalCustomers > 0 ? Math.round(count / stats.totalCustomers * 100) : 0}%"></div></div><span class="dist-count">${count}</span></div>`
     ).join("");
 
     let topBySpending = [...customers].sort((a, b) => (b.totalPaid || 0) - (a.totalPaid || 0)).slice(0, 10);
-    let topBySessions = [...customers].sort((a, b) => getSessionStats(b.id, sessions).count - getSessionStats(a.id, sessions).count).slice(0, 10);
+    let topBySessions = [...customers].sort((a, b) => (sessionStatsMap[b.id]?.count || 0) - (sessionStatsMap[a.id]?.count || 0)).slice(0, 10);
 
     let leaderboardSpendingHtml = topBySpending.map((c, i) => {
       let rank = computeRank(c.totalPaid || 0, categories);
-      let badge = rank ? `<span class="rank-badge rank-sm" style="background:${rank.color}">${rank.category} ${rank.tier}</span>` : "";
+      let badge = rank ? `<span class="rank-badge rank-sm" style="background:${Utils.escapeHtml(rank.color)}">${Utils.escapeHtml(rank.category)} ${rank.tier}</span>` : "";
       return `<div class="list-row"><span class="row-label">#${i + 1} ${Utils.escapeHtml(c.firstName)} ${Utils.escapeHtml(c.lastName)} ${badge}</span><span class="row-value">${Utils.formatCurrency(c.totalPaid || 0)}</span></div>`;
     }).join("");
 
     let leaderboardSessionsHtml = topBySessions.map((c, i) => {
-      let ss = getSessionStats(c.id, sessions);
+      let ss = sessionStatsMap[c.id];
       let rank = computeRank(c.totalPaid || 0, categories);
-      let badge = rank ? `<span class="rank-badge rank-sm" style="background:${rank.color}">${rank.category} ${rank.tier}</span>` : "";
-      return `<div class="list-row"><span class="row-label">#${i + 1} ${Utils.escapeHtml(c.firstName)} ${Utils.escapeHtml(c.lastName)} ${badge}</span><span class="row-value">${ss.count} جلسه</span></div>`;
+      let badge = rank ? `<span class="rank-badge rank-sm" style="background:${Utils.escapeHtml(rank.color)}">${Utils.escapeHtml(rank.category)} ${rank.tier}</span>` : "";
+      return `<div class="list-row"><span class="row-label">#${i + 1} ${Utils.escapeHtml(c.firstName)} ${Utils.escapeHtml(c.lastName)} ${badge}</span><span class="row-value">${ss ? ss.count : 0} جلسه</span></div>`;
     }).join("");
 
     el.innerHTML = `
@@ -201,7 +202,7 @@ const CustomerClub = (function () {
           <select id="clubRankFilter" onchange="CustomerClub.onRankFilter(this.value)">
             <option value="">همه رتبه‌ها</option>
             ${rankOptions}
-            <option value="" ${!currentRankFilter ? "disabled" : ""}>— بدون رتبه —</option>
+            <option value="__none__" ${currentRankFilter === "__none__" ? "selected" : ""}>— بدون رتبه —</option>
           </select>
           <select id="clubInterestFilter" onchange="CustomerClub.onInterestFilter(this.value)">
             <option value="">همه علایق</option>

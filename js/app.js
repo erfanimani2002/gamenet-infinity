@@ -162,10 +162,10 @@ const App = (function () {
       Reports.autoClosePastDays(now);
     }
     tick();
-    setInterval(tick, 30000);
+    timerIntervals["dayCloseTick"] = setInterval(tick, 30000);
 
     Backup.writeAutoBackup();
-    setInterval(() => Backup.writeAutoBackup(), 10 * 60 * 1000);
+    timerIntervals["autoBackup"] = setInterval(() => Backup.writeAutoBackup(), 10 * 60 * 1000);
   }
 
   async function doLogout() {

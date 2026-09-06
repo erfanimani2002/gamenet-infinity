@@ -38,12 +38,17 @@ http.createServer((req, res) => {
         let parsed;
         try { parsed = JSON.parse(body.toString()); } catch (_) { parsed = {}; }
         let name;
-        if (parsed && parsed._name) {
-          name = parsed._name;
+        if (parsed && typeof parsed._name === "string" && parsed._name) {
+          name = parsed._name.replace(/[^a-zA-Z0-9._-]/g, "");
+          if (!name.endsWith(".json")) name += ".json";
         } else {
           name = "gamenet-" + new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-") + ".json";
         }
         const file = path.join(BACKUP_DIR, name);
+        if (!file.startsWith(BACKUP_DIR)) {
+          res.writeHead(403, { "Content-Type": "application/json" });
+          return res.end(JSON.stringify({ ok: false, error: "forbidden" }));
+        }
         fs.writeFileSync(file, body);
         res.writeHead(200, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ ok: true, file: name }));
