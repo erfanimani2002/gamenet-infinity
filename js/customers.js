@@ -148,7 +148,7 @@ const Customers = (function () {
     let historyHtml = history.map((s) => {
       let device = devices.find((d) => d.id === s.deviceId);
       let typeName = s.deviceType === "console" ? "کنسول" : s.deviceType === "billiard" ? "بیلیارد" : s.deviceType === "pc" ? "پی‌سی" : s.deviceType;
-      let payTypeName = s.settlePayType === "wallet" ? "کیف‌پول" : s.settlePayType === "debt" ? "بدهکاری" : s.settlePayType === "cash" ? "نقدی" : "کارتی";
+      let payTypeName = s.settlePayType === "wallet" ? "کیف‌پول" : s.settlePayType === "debt" ? "بدهکاری" : s.settlePayType === "cash" ? "نقدی" : s.settlePayType === "card" ? "کارتی" : s.settlePayType === "split" ? "ترکیبی" : s.settlePayType || "نقدی";
       return `<div class="block-item">
         <span>${typeName}${device ? " — " + Utils.escapeHtml(device.name) : ""}: ${Utils.formatCurrency(s.settleAmount || 0)} (${payTypeName})</span>
         <span class="text-muted text-sm">${s.settledAt ? Jalali.formatDateTime(s.settledAt) : "-"}</span>

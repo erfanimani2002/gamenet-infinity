@@ -35,7 +35,14 @@ http.createServer((req, res) => {
     req.on("end", () => {
       try {
         const body = Buffer.concat(chunks);
-        const name = "gamenet-" + new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-") + ".json";
+        let parsed;
+        try { parsed = JSON.parse(body.toString()); } catch (_) { parsed = {}; }
+        let name;
+        if (parsed && parsed._name) {
+          name = parsed._name;
+        } else {
+          name = "gamenet-" + new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-") + ".json";
+        }
         const file = path.join(BACKUP_DIR, name);
         fs.writeFileSync(file, body);
         res.writeHead(200, { "Content-Type": "application/json" });

@@ -635,32 +635,62 @@ const Consoles = (function () {
     let session = sessions.find((s) => s.deviceId === deviceId && s.status === "active");
     if (!session) return;
 
-    // Restore stock for cafe items (by itemId when present, else name).
     let cafeItems = await DB.getAll("cafeItems");
+    let allBp = await DB.getAll("blockPayments");
+    let allCustomers = await DB.getAll("customers");
+    let device = await DB.get("devices", deviceId);
+
+    // Pre-compute cafe item stock changes.
+    let cafeItemChanges = {};
     for (let it of (session.items || [])) {
       if (it.type === "cafe") {
         let cafeItem = it.itemId != null ? cafeItems.find((ci) => ci.id === it.itemId) : cafeItems.find((ci) => ci.name === it.name);
-        if (cafeItem && !cafeItem.unlimited) { cafeItem.stock += (it.qty || 1); await DB.put("cafeItems", cafeItem); }
+        if (cafeItem && !cafeItem.unlimited) {
+          if (!cafeItemChanges[cafeItem.id]) cafeItemChanges[cafeItem.id] = { ...cafeItem };
+          cafeItemChanges[cafeItem.id].stock += (it.qty || 1);
+        }
       }
     }
-    // Reverse payments from settled blocks against whichever customer actually
-    // paid for each block (recorded in blockPayments), not just the session's
-    // first customer — a different attendee may have settled that block.
-    let allBp = await DB.getAll("blockPayments");
+
+    // Pre-compute customer payment reversals.
+    let customerChanges = {};
+    let blockPaymentRemovals = [];
     for (let i = 0; i < (session.timeBlocks || []).length; i++) {
       let b = session.timeBlocks[i];
       if (!b.settled || !b.settlePayType) continue;
       let bp = allBp.find((r) => r.sessionId === session.id && r.blockIndex === i);
       let payerId = bp ? bp.customerId : (session.ids && session.ids[0]);
       if (payerId) {
-        await Reports.reversePayment(payerId, b.price || 0, b.settlePayType, bp ? bp.payBreakdown : b.payBreakdown);
+        if (!customerChanges[payerId]) {
+          let c = allCustomers.find((x) => x.id === payerId);
+          if (c) customerChanges[payerId] = { ...c };
+        }
+        let c = customerChanges[payerId];
+        if (c) {
+          let amount = b.price || 0;
+          let payType = bp ? bp.payBreakdown : b.payBreakdown;
+          if (payType && typeof payType === "object") {
+            let w = payType.wallet || 0, d = payType.debt || 0, other = (payType.cash || 0) + (payType.card || 0);
+            if (w) { c.wallet = (c.wallet || 0) + w; c.totalPaid = Math.max(0, (c.totalPaid || 0) - w); }
+            if (d) { c.debt = Math.max(0, (c.debt || 0) - d); }
+            if (other) { c.totalPaid = Math.max(0, (c.totalPaid || 0) - other); }
+          } else if (b.settlePayType === "wallet") {
+            c.wallet = (c.wallet || 0) + amount; c.totalPaid = Math.max(0, (c.totalPaid || 0) - amount);
+          } else if (b.settlePayType === "debt") {
+            c.debt = Math.max(0, (c.debt || 0) - amount);
+          } else {
+            c.totalPaid = Math.max(0, (c.totalPaid || 0) - amount);
+          }
+        }
       }
-      if (bp) await DB.remove("blockPayments", bp.id);
+      if (bp) blockPaymentRemovals.push(bp);
     }
 
     App.stopTimer("timer-" + deviceId);
-    let device = await DB.get("devices", deviceId);
     await DB.runAtomic([
+      ...Object.values(customerChanges).map((c) => ({ store: "customers", type: "put", data: c })),
+      ...Object.values(cafeItemChanges).map((ci) => ({ store: "cafeItems", type: "put", data: ci })),
+      ...blockPaymentRemovals.map((bp) => ({ store: "blockPayments", type: "remove", data: bp.id })),
       { store: "sessions", type: "remove", data: session.id },
       { store: "devices", type: "put", data: { ...device, status: "free" } },
     ]);

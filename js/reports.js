@@ -409,7 +409,7 @@ const Reports = (function () {
   // diff*, closedAt, reconConfirmedAt, autoClosed*) are preserved untouched;
   // we only ever add the cashIn/cardIn/cashOut/cardOut fields on top when
   // they are missing, we never overwrite an existing frozen/reconciled row.
-  async function freezeBusinessDay(range) {
+  async function freezeBusinessDay(range, preloaded) {
     let now = new Date();
     if (range.end > now) return null; // still open — never freeze
 
@@ -420,7 +420,7 @@ const Reports = (function () {
       return existing;
     }
 
-    let totals = await calculateDailyTotals(range);
+    let totals = await calculateDailyTotals(range, preloaded);
     let daySummary = Object.assign({}, existing, {
       date: key,
       cashIn: totals.totalCashIn,
@@ -443,13 +443,25 @@ const Reports = (function () {
   async function autoClosePastDays(now) {
     now = now instanceof Date ? now : new Date();
 
+    let preloaded = {
+      sessions: await DB.getAll("sessions"),
+      cafeOrders: await DB.getAll("cafeOrders"),
+      debtPayments: await DB.getAll("debtPayments"),
+      walletCharges: await DB.getAll("walletCharges"),
+      purchases: await DB.getAll("purchases"),
+      blockPayments: await DB.getAll("blockPayments"),
+      tournaments: await DB.getAll("tournaments"),
+      matches: await DB.getAll("matches"),
+      prizePayouts: await DB.getAll("prizePayouts"),
+    };
+
     for (let i = 0; i <= 31; i++) {
       let day = new Date(now);
       day.setDate(day.getDate() - i);
       day.setHours(12, 0, 0, 0);
       let range = Utils.getReportRange(day);
       if (range.end <= now) {
-        await freezeBusinessDay(range);
+        await freezeBusinessDay(range, preloaded);
       }
     }
 
@@ -460,7 +472,7 @@ const Reports = (function () {
     if (currentOpenStart <= now) {
       let justEnded = Utils.getReportRange(new Date(currentOpenStart.getTime() - 1));
       if (justEnded.end <= now) {
-        await freezeBusinessDay(justEnded);
+        await freezeBusinessDay(justEnded, preloaded);
       }
     }
   }
@@ -760,6 +772,15 @@ const Reports = (function () {
           session.settleAmount = newAmount;
           session.settlePayType = newPayType;
         }
+        // Proportionally scale the device-type breakdown when the amount changes.
+        if (session.settleBreakdown && oldAmount > 0 && newAmount !== oldAmount) {
+          let ratio = newAmount / oldAmount;
+          session.settleBreakdown = {
+            console: Math.round((session.settleBreakdown.console || 0) * ratio),
+            billiard: Math.round((session.settleBreakdown.billiard || 0) * ratio),
+            pc: Math.round((session.settleBreakdown.pc || 0) * ratio),
+          };
+        }
         await DB.put("sessions", session);
       }
     } else if (type === "blockPayment") {
@@ -798,6 +819,20 @@ const Reports = (function () {
           bp.payType = newPayType;
         }
         await DB.put("blockPayments", bp);
+        // Update the parent session's settleBreakdown proportionally.
+        if (bp.sessionId && oldAmount !== newAmount) {
+          let session = await DB.get("sessions", bp.sessionId);
+          if (session && session.settleBreakdown && oldAmount > 0) {
+            let ratio = newAmount / oldAmount;
+            session.settleBreakdown = {
+              console: Math.round((session.settleBreakdown.console || 0) * ratio),
+              billiard: Math.round((session.settleBreakdown.billiard || 0) * ratio),
+              pc: Math.round((session.settleBreakdown.pc || 0) * ratio),
+            };
+            session.settleAmount = (session.settleAmount || 0) + (newAmount - oldAmount);
+            await DB.put("sessions", session);
+          }
+        }
       }
     } else {
       let order = await DB.get("cafeOrders", id);
@@ -853,6 +888,14 @@ const Reports = (function () {
         }
         // Restore cafe item stock for items attached to this session.
         await restoreCafeStock(session.items || []);
+        // Free the device so it can be used again.
+        if (session.deviceId) {
+          let device = await DB.get("devices", session.deviceId);
+          if (device && device.status !== "free") {
+            device.status = "free";
+            await DB.put("devices", device);
+          }
+        }
         session.status = "deleted";
         session.settledAt = null;
         await DB.put("sessions", session);

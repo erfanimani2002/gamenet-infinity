@@ -214,13 +214,14 @@ const Backup = (function () {
       let data = await DB.exportAll();
       data._exportDate = new Date().toISOString();
       data._version = 1;
+      data._name = "gamenet-auto-backup.json";
       let res = await fetch("/api/backup", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(data),
       });
       if (!res.ok) throw new Error("backup http " + res.status);
-      await DB.logActivity("بک‌آپ خودکار", "ساعت ۲۳:۳۵");
+      await DB.logActivity("بک‌آپ خودکار", new Date().toLocaleTimeString("fa-IR"));
     } catch (e) {
       console.error("auto backup failed", e);
     }
