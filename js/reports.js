@@ -597,6 +597,43 @@ const Reports = (function () {
     </div><div class="modal-actions"><button class="btn btn-outline" onclick="App.closeModalForce()">بستن</button></div>`);
   }
 
+  // A payment is "split" (wallet+debt) either because its stored payType says
+  // so, or — for older/edge records — because its breakdown itself carries
+  // both a wallet leg and a debt leg. Used to keep editTransaction/
+  // saveEditTransaction from ever routing such a record through a plain
+  // cash/card/wallet/debt dropdown, which would silently convert it.
+  function isSplitPayment(payType, payBreakdown) {
+    if (payType === "split") return true;
+    if (payBreakdown && typeof payBreakdown === "object") {
+      return (payBreakdown.wallet || 0) > 0 && (payBreakdown.debt || 0) > 0;
+    }
+    return false;
+  }
+
+  // Restores an exact previously-reversed breakdown onto a customer, leg by
+  // leg — the literal inverse of reversePayment's breakdown branch. Used only
+  // to roll back a failed re-apply during a split-payment amount edit, so we
+  // never have to pass "split" as a payType string into applyPayment/
+  // computePaymentUpdate (which would treat it as an unknown type and dump
+  // the whole amount into cash — the second corruption this fix prevents).
+  async function applyBreakdownDirect(customerId, payBreakdown) {
+    if (!customerId || !payBreakdown) return;
+    let customer = await DB.get("customers", customerId);
+    if (!customer) return;
+    let w = payBreakdown.wallet || 0, d = payBreakdown.debt || 0, c = payBreakdown.cash || 0, cd = payBreakdown.card || 0;
+    if (w) {
+      customer.wallet = Math.max(0, (customer.wallet || 0) - w);
+      customer.totalPaid = (customer.totalPaid || 0) + w;
+    }
+    if (d) {
+      customer.debt = (customer.debt || 0) + d;
+    }
+    if (c || cd) {
+      customer.totalPaid = (customer.totalPaid || 0) + c + cd;
+    }
+    await DB.put("customers", customer);
+  }
+
   async function editTransaction(txType, txId) {
     let t = null;
     if (txType === "session") {
@@ -606,7 +643,7 @@ const Reports = (function () {
         let device = devices.find((d) => d.id === s.deviceId);
         let customers = await DB.getAll("customers");
         let idsText = (s.ids || []).map((id) => { let c = customers.find((cu) => cu.id === id); return "#" + (c ? (c.displayId || c.id) : id); }).join(", ");
-        t = { type: "session", id: s.id, typeName: s.deviceType === "console" ? "کنسول" : s.deviceType === "billiard" ? "بیلیارد" : "پی‌سی", device: device ? device.name : "-", amount: s.settleAmount || 0, payType: s.settlePayType, ids: idsText };
+        t = { type: "session", id: s.id, typeName: s.deviceType === "console" ? "کنسول" : s.deviceType === "billiard" ? "بیلیارد" : "پی‌سی", device: device ? device.name : "-", amount: s.settleAmount || 0, payType: s.settlePayType, payBreakdown: s.payBreakdown, ids: idsText };
       }
     } else if (txType === "blockPayment") {
       let bp = await DB.get("blockPayments", txId);
@@ -615,14 +652,14 @@ const Reports = (function () {
         let device = devices.find((d) => d.id === bp.deviceId);
         let customers = await DB.getAll("customers");
         let c = customers.find((cu) => cu.id === bp.customerId);
-        t = { type: "blockPayment", id: bp.id, typeName: bp.deviceType === "tournament" ? "تسویه بازی مسابقه" : bp.deviceType === "console" ? "تسویه بلوک کنسول" : "تسویه بلوک بیلیارد", device: device ? device.name : "-", amount: bp.amount || 0, payType: bp.payType, ids: c ? "#" + (c.displayId || c.id) : "-" };
+        t = { type: "blockPayment", id: bp.id, typeName: bp.deviceType === "tournament" ? "تسویه بازی مسابقه" : bp.deviceType === "console" ? "تسویه بلوک کنسول" : "تسویه بلوک بیلیارد", device: device ? device.name : "-", amount: bp.amount || 0, payType: bp.payType, payBreakdown: bp.payBreakdown, ids: c ? "#" + (c.displayId || c.id) : "-" };
       }
     } else {
       let o = await DB.get("cafeOrders", txId);
       if (o) {
         let customers = await DB.getAll("customers");
         let c = customers.find((cu) => cu.id === o.customerId);
-        t = { type: "order", id: o.id, typeName: "کافی‌شاپ", device: "-", amount: o.total, payType: o.payType, ids: c ? "#" + (c.displayId || c.id) : "-" };
+        t = { type: "order", id: o.id, typeName: "کافی‌شاپ", device: "-", amount: o.total, payType: o.payType, payBreakdown: o.payBreakdown, ids: c ? "#" + (c.displayId || c.id) : "-" };
       }
     }
     if (!t) return;
@@ -631,7 +668,9 @@ const Reports = (function () {
       <h2>ویرایش تراکنش</h2>
       <div class="list-row"><span class="row-label">نوع</span><span class="row-value">${t.typeName}</span></div>
       <div class="form-group"><label>مبلغ</label><input type="number" id="editTxAmount" value="${t.amount}" min="0"></div>
-      <div class="form-group"><label>روش پرداخت</label><select id="editTxPayType"><option value="cash" ${t.payType === 'cash' ? 'selected' : ''}>نقدی</option><option value="card" ${t.payType === 'card' ? 'selected' : ''}>کارتی</option><option value="wallet" ${t.payType === 'wallet' ? 'selected' : ''}>کیف‌پول</option><option value="debt" ${t.payType === 'debt' ? 'selected' : ''}>بدهکاری</option></select></div>
+      ${isSplitPayment(t.payType, t.payBreakdown)
+        ? `<div class="form-group"><label>روش پرداخت</label><input type="text" value="کیف‌پول + بدهی" disabled></div>`
+        : `<div class="form-group"><label>روش پرداخت</label><select id="editTxPayType"><option value="cash" ${t.payType === 'cash' ? 'selected' : ''}>نقدی</option><option value="card" ${t.payType === 'card' ? 'selected' : ''}>کارتی</option><option value="wallet" ${t.payType === 'wallet' ? 'selected' : ''}>کیف‌پول</option><option value="debt" ${t.payType === 'debt' ? 'selected' : ''}>بدهکاری</option></select></div>`}
       <div class="modal-actions">
         <button class="btn btn-success" onclick="Reports.saveEditTransaction('${t.type}', ${t.id})">ذخیره</button>
         <button class="btn btn-danger" onclick="Reports.deleteTransaction('${t.type}', ${t.id})">حذف</button>
@@ -676,15 +715,36 @@ const Reports = (function () {
 
   async function saveEditTransaction(type, id) {
     let newAmount = parseInt(document.getElementById("editTxAmount").value) || 0;
-    let newPayType = document.getElementById("editTxPayType").value;
+    // The method dropdown only exists for non-split rows (see editTransaction) —
+    // reading it unconditionally would throw on a split row's disabled label.
+    let payTypeEl = document.getElementById("editTxPayType");
+    let newPayType = payTypeEl ? payTypeEl.value : null;
+
     if (type === "session") {
       let session = await DB.get("sessions", id);
       if (session) {
         let oldAmount = session.settleAmount || 0;
         let oldPayType = session.settlePayType || "cash";
+        let oldBreakdown = session.payBreakdown;
         let customerId = session.settlePayerId || (session.ids && session.ids[0]) || null;
-        if (customerId && (oldAmount !== newAmount || oldPayType !== newPayType)) {
-          await reversePayment(customerId, oldAmount, oldPayType, session.payBreakdown);
+
+        if (isSplitPayment(oldPayType, oldBreakdown)) {
+          if (newAmount !== oldAmount && customerId) {
+            await reversePayment(customerId, oldAmount, oldPayType, oldBreakdown);
+            let payResult = await Utils.applyPayment(customerId, newAmount, "wallet");
+            if (!payResult.success) {
+              await applyBreakdownDirect(customerId, oldBreakdown);
+              App.toast("پرداخت ناموفق بود");
+              return;
+            }
+            session.settlePayType = payResult.payType;
+            session.payBreakdown = payResult.payBreakdown;
+          }
+          // Amount unchanged (or no customer to move money for): payType/
+          // payBreakdown are left exactly as they were — no-op on the till.
+          session.settleAmount = newAmount;
+        } else if (customerId && (oldAmount !== newAmount || oldPayType !== newPayType)) {
+          await reversePayment(customerId, oldAmount, oldPayType, oldBreakdown);
           let payResult = await Utils.applyPayment(customerId, newAmount, newPayType);
           if (!payResult.success) {
             // Roll back to the original payment so the reversal above doesn't
@@ -694,9 +754,12 @@ const Reports = (function () {
             return;
           }
           session.payBreakdown = payResult.payBreakdown;
+          session.settleAmount = newAmount;
+          session.settlePayType = newPayType;
+        } else {
+          session.settleAmount = newAmount;
+          session.settlePayType = newPayType;
         }
-        session.settleAmount = newAmount;
-        session.settlePayType = newPayType;
         await DB.put("sessions", session);
       }
     } else if (type === "blockPayment") {
@@ -704,8 +767,23 @@ const Reports = (function () {
       if (bp) {
         let oldAmount = bp.amount || 0;
         let oldPayType = bp.payType || "cash";
-        if (bp.customerId && (oldAmount !== newAmount || oldPayType !== newPayType)) {
-          await reversePayment(bp.customerId, oldAmount, oldPayType, bp.payBreakdown);
+        let oldBreakdown = bp.payBreakdown;
+
+        if (isSplitPayment(oldPayType, oldBreakdown)) {
+          if (newAmount !== oldAmount && bp.customerId) {
+            await reversePayment(bp.customerId, oldAmount, oldPayType, oldBreakdown);
+            let payResult = await Utils.applyPayment(bp.customerId, newAmount, "wallet");
+            if (!payResult.success) {
+              await applyBreakdownDirect(bp.customerId, oldBreakdown);
+              App.toast("پرداخت ناموفق بود");
+              return;
+            }
+            bp.payType = payResult.payType;
+            bp.payBreakdown = payResult.payBreakdown;
+          }
+          bp.amount = newAmount;
+        } else if (bp.customerId && (oldAmount !== newAmount || oldPayType !== newPayType)) {
+          await reversePayment(bp.customerId, oldAmount, oldPayType, oldBreakdown);
           let payResult = await Utils.applyPayment(bp.customerId, newAmount, newPayType);
           if (!payResult.success) {
             await Utils.applyPayment(bp.customerId, oldAmount, oldPayType);
@@ -713,9 +791,12 @@ const Reports = (function () {
             return;
           }
           bp.payBreakdown = payResult.payBreakdown;
+          bp.amount = newAmount;
+          bp.payType = newPayType;
+        } else {
+          bp.amount = newAmount;
+          bp.payType = newPayType;
         }
-        bp.amount = newAmount;
-        bp.payType = newPayType;
         await DB.put("blockPayments", bp);
       }
     } else {
@@ -723,8 +804,23 @@ const Reports = (function () {
       if (order) {
         let oldAmount = order.total || 0;
         let oldPayType = order.payType || "cash";
-        if (order.customerId && (oldAmount !== newAmount || oldPayType !== newPayType)) {
-          await reversePayment(order.customerId, oldAmount, oldPayType, order.payBreakdown);
+        let oldBreakdown = order.payBreakdown;
+
+        if (isSplitPayment(oldPayType, oldBreakdown)) {
+          if (newAmount !== oldAmount && order.customerId) {
+            await reversePayment(order.customerId, oldAmount, oldPayType, oldBreakdown);
+            let payResult = await Utils.applyPayment(order.customerId, newAmount, "wallet");
+            if (!payResult.success) {
+              await applyBreakdownDirect(order.customerId, oldBreakdown);
+              App.toast("پرداخت ناموفق بود");
+              return;
+            }
+            order.payType = payResult.payType;
+            order.payBreakdown = payResult.payBreakdown;
+          }
+          order.total = newAmount;
+        } else if (order.customerId && (oldAmount !== newAmount || oldPayType !== newPayType)) {
+          await reversePayment(order.customerId, oldAmount, oldPayType, oldBreakdown);
           let payResult = await Utils.applyPayment(order.customerId, newAmount, newPayType);
           if (!payResult.success) {
             await Utils.applyPayment(order.customerId, oldAmount, oldPayType);
@@ -732,9 +828,12 @@ const Reports = (function () {
             return;
           }
           order.payBreakdown = payResult.payBreakdown;
+          order.total = newAmount;
+          order.payType = newPayType;
+        } else {
+          order.total = newAmount;
+          order.payType = newPayType;
         }
-        order.total = newAmount;
-        order.payType = newPayType;
         await DB.put("cafeOrders", order);
       }
     }
