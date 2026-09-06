@@ -212,6 +212,11 @@ const AdminPanel = (function () {
     let name = document.getElementById("newName").value.trim();
     let role = document.getElementById("newRole").value;
     if (!username || !password) { App.toast("نام کاربری و رمز عبور الزامی است"); return; }
+    let users = await DB.getAll("users");
+    if (users.some((u) => u.username === username)) {
+      App.toast("این نام کاربری قبلاً استفاده شده");
+      return;
+    }
     await DB.add("users", { username, password, role, name });
     await DB.logActivity("افزودن کاربر", username + " (" + (role === 'manager' ? 'مدیر' : 'ادمین') + ")");
     App.closeModalForce();

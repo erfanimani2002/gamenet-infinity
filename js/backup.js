@@ -87,6 +87,85 @@ const Backup = (function () {
         XLSX.utils.book_append_sheet(wb, ws, "پرسنل");
       }
 
+      // Café orders (open orders + settled history), with items and payment type.
+      if (data.cafeOrders && data.cafeOrders.length) {
+        let customers = data.customers || [];
+        let ws = XLSX.utils.json_to_sheet(data.cafeOrders.map((o) => {
+          let c = customers.find((cu) => cu.id === o.customerId);
+          return {
+            "شناسه": c ? "#" + (c.displayId || c.id) : o.customerId,
+            "آیتم‌ها": (o.items || []).map((i) => i.name + " x" + i.qty).join("، "),
+            "جمع": o.total, "روش پرداخت": o.payType,
+            "تاریخ": o.createdAt ? Jalali.formatDateTime(o.createdAt) : "",
+          };
+        }));
+        XLSX.utils.book_append_sheet(wb, ws, "سفارشات کافی‌شاپ");
+      }
+
+      // Wallet charge history.
+      if (data.walletCharges && data.walletCharges.length) {
+        let customers = data.customers || [];
+        let ws = XLSX.utils.json_to_sheet(data.walletCharges.map((c) => {
+          let cust = customers.find((cu) => cu.id === c.customerId);
+          return {
+            "شناسه": cust ? "#" + (cust.displayId || cust.id) : c.customerId,
+            "مبلغ": c.amount, "روش": c.paymentType === 'cash' ? 'نقدی' : 'کارتی',
+            "تاریخ": Jalali.formatDateTime(c.date),
+          };
+        }));
+        XLSX.utils.book_append_sheet(wb, ws, "شارژ کیف‌پول");
+      }
+
+      // Current cafe item inventory levels.
+      if (data.cafeItems && data.cafeItems.length) {
+        let ws = XLSX.utils.json_to_sheet(data.cafeItems.map((it) => ({
+          "نام": it.name, "قیمت": it.price,
+          "موجودی": it.unlimited ? "نامحدود" : it.stock,
+        })));
+        XLSX.utils.book_append_sheet(wb, ws, "موجودی کافی‌شاپ");
+      }
+
+      // Day-close summaries.
+      if (data.dailySummaries && data.dailySummaries.length) {
+        let ws = XLSX.utils.json_to_sheet(data.dailySummaries.map((s) => ({
+          "تاریخ": s.date, "نقدی ورودی": s.cashIn, "کارتی ورودی": s.cardIn,
+          "نقدی خروجی": s.cashOut, "کارتی خروجی": s.cardOut,
+        })));
+        XLSX.utils.book_append_sheet(wb, ws, "بستن روز");
+      }
+
+      // Block/tournament settlements.
+      if (data.blockPayments && data.blockPayments.length) {
+        let customers = data.customers || [];
+        let ws = XLSX.utils.json_to_sheet(data.blockPayments.map((bp) => {
+          let c = customers.find((cu) => cu.id === bp.customerId);
+          return {
+            "نوع": bp.deviceType === "tournament" ? "تسویه بازی مسابقه" : "تسویه بلوک",
+            "شناسه": c ? "#" + (c.displayId || c.id) : bp.customerId,
+            "مبلغ": bp.amount, "روش": bp.payType, "تسویه‌کننده": bp.settlerName || "",
+            "تاریخ": bp.date ? Jalali.formatDateTime(bp.date) : "",
+          };
+        }));
+        XLSX.utils.book_append_sheet(wb, ws, "تسویه بلوک/مسابقه");
+      }
+
+      // Prize payouts.
+      if (data.prizePayouts && data.prizePayouts.length) {
+        let customers = data.customers || [];
+        let tournaments = data.tournaments || [];
+        let ws = XLSX.utils.json_to_sheet(data.prizePayouts.map((p) => {
+          let c = customers.find((cu) => cu.id === p.customerId);
+          let t = tournaments.find((tt) => tt.id === p.tournamentId);
+          return {
+            "مسابقه": t ? t.name : "", "جایگاه": p.place,
+            "شناسه": c ? "#" + (c.displayId || c.id) : p.customerId,
+            "مبلغ": p.amount, "روش": p.payType,
+            "تاریخ": p.date ? Jalali.formatDateTime(p.date) : "",
+          };
+        }));
+        XLSX.utils.book_append_sheet(wb, ws, "جوایز");
+      }
+
       XLSX.writeFile(wb, "گیمنت_اینفینیتی_بک‌آپ_" + Jalali.formatDate(new Date()).replace(/\//g, "-") + ".xlsx");
       App.toast("فایل اکسل دانلود شد");
     } catch (e) {

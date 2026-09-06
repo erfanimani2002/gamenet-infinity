@@ -1,6 +1,8 @@
 (async function seedTestData() {
   const DB_NAME = "GameNetInfinity";
-  const DB_VERSION = 1;
+  // Keep in sync with js/db.js DB_VERSION; the store list below includes every
+  // store the app schema declares so this can build a complete v5 schema.
+  const DB_VERSION = 5;
 
   function openDB() {
     return new Promise((resolve, reject) => {
@@ -23,6 +25,12 @@
           debtPayments: { keyPath: "id", autoIncrement: true },
           walletCharges: { keyPath: "id", autoIncrement: true },
           dailySummaries: { keyPath: "date" },
+          games: { keyPath: "id", autoIncrement: true },
+          tournaments: { keyPath: "id", autoIncrement: true },
+          matches: { keyPath: "id", autoIncrement: true },
+          tournamentParticipants: { keyPath: "id", autoIncrement: true },
+          blockPayments: { keyPath: "id", autoIncrement: true },
+          prizePayouts: { keyPath: "id", autoIncrement: true },
         };
         let indexes = {
           sessions: [["by_device", "deviceId"], ["by_status", "status"], ["by_created", "createdAt"]],
@@ -32,6 +40,10 @@
           debtPayments: [["by_customer", "customerId"]],
           walletCharges: [["by_customer", "customerId"]],
           purchases: [["by_date", "date"]],
+          matches: [["by_tournament", "tournamentId"]],
+          tournamentParticipants: [["by_tournament", "tournamentId"]],
+          blockPayments: [["by_session", "sessionId"]],
+          prizePayouts: [["by_tournament", "tournamentId"]],
         };
         for (let [name, opts] of Object.entries(stores)) {
           if (!db.objectStoreNames.contains(name)) {

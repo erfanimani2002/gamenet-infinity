@@ -102,6 +102,7 @@ const Cafe = (function () {
             </div>
           `).join("")}
         </div>
+        <button class="btn btn-sm btn-outline" style="margin-top:6px;" onclick="Cafe.quickCreateCustomer()">+ مشتری جدید سریع</button>
       </div>
       <div class="form-group">
         <label>شناسه انتخاب شده</label>
@@ -140,6 +141,16 @@ const Cafe = (function () {
     selectedCustomerId = id;
     let c = await DB.get("customers", id);
     document.getElementById("cafeSelectedId").innerHTML = c ? "#" + (c.displayId || c.id) : "#" + id;
+  }
+
+  // "مشتری جدید سریع" — same inline create used by the console/billiard/pc
+  // session pickers; on creation it selects the new customer and re-renders the
+  // order modal so its ID shows as selected.
+  function quickCreateCustomer() {
+    Customers.promptQuickCreate(async (result) => {
+      pickCustomer(result.id);
+      await showNewOrder();
+    });
   }
 
   async function placeOrder() {
@@ -215,5 +226,5 @@ const Cafe = (function () {
     }
   }
 
-  return { render, addToCart, removeFromCart, showNewOrder, placeOrder, filterCustomers, pickCustomer, refresh };
+  return { render, addToCart, removeFromCart, showNewOrder, placeOrder, filterCustomers, pickCustomer, quickCreateCustomer, refresh };
 })();

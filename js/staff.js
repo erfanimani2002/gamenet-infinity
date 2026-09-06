@@ -142,15 +142,30 @@ const Staff = (function () {
 
   async function showStatsTab(staffId) {
     let staff = await DB.get("staff", staffId);
+    let now = new Date();
     let jalaliToday = Jalali.getTodayJalali();
 
-    let totalMonthlyHours = 0;
+    // Hours for a shift: its duration, or elapsed time until now if still open.
+    const shiftHoursNow = (s) => {
+      let end = s.end ? new Date(s.end) : now;
+      return Math.max(0, (end - new Date(s.start)) / 3600000);
+    };
+
     let monthlyShifts = (staff.shifts || []).filter((s) => {
       let d = new Date(s.start);
       let j = Jalali.gregorianToJalali(d.getFullYear(), d.getMonth() + 1, d.getDate());
       return j.year === jalaliToday.year && j.month === jalaliToday.month;
     });
-    monthlyShifts.forEach((s) => { if (s.end) totalMonthlyHours += (new Date(s.end) - new Date(s.start)) / 3600000; });
+    // Monthly total includes an open shift's elapsed hours so far.
+    let totalMonthlyHours = monthlyShifts.reduce((sum, s) => sum + shiftHoursNow(s), 0);
+
+    // Calendar-today hours (business-day boundary not required here); an open
+    // shift is counted as elapsed time until now.
+    let todayShifts = (staff.shifts || []).filter((s) => {
+      let d = new Date(s.start);
+      return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate();
+    });
+    let todayHours = todayShifts.reduce((sum, s) => sum + shiftHoursNow(s), 0);
 
     let monthlyConsumption = (staff.consumption || []).filter((c) => {
       let d = new Date(c.date);
@@ -170,7 +185,8 @@ const Staff = (function () {
     document.getElementById("staffTabContent").innerHTML = `
       <div id="statsSection">
         <h3>آمار ماه جاری (${jalaliToday.year}/${jalaliToday.month})</h3>
-        <div class="list-row"><span class="row-label">ساعات کار</span><span class="row-value font-bold">${totalMonthlyHours.toFixed(1)} ساعت</span></div>
+        <div class="list-row"><span class="row-label">ساعات کار امروز (تبری)</span><span class="row-value font-bold">${todayHours.toFixed(1)} ساعت</span></div>
+        <div class="list-row"><span class="row-label">ساعات کار (این ماه)</span><span class="row-value font-bold">${totalMonthlyHours.toFixed(1)} ساعت</span></div>
         <div class="list-row"><span class="row-label">تعداد شیفت</span><span class="row-value">${monthlyShifts.length}</span></div>
         <div class="list-row"><span class="row-label">مجموع مصرف</span><span class="row-value amount">${Utils.formatCurrency(totalConsumption)}</span></div>
         <hr class="section-divider">
@@ -186,7 +202,7 @@ const Staff = (function () {
         <hr class="section-divider">
         <h3>تاریخچه شیفت‌ها</h3>
         ${monthlyShifts.reverse().map((s) => {
-          let dur = s.end ? Utils.formatDuration(new Date(s.end) - new Date(s.start)) : "در حال اجرا";
+          let dur = s.end ? Utils.formatDuration(new Date(s.end) - new Date(s.start)) : Utils.formatDuration(now - new Date(s.start)) + " (در حال اجرا)";
           return `<div class="block-item"><span>${Jalali.formatDateTime(new Date(s.start))} - ${s.end ? Jalali.timeString(new Date(s.end)) : '...'}</span><span>${dur}</span></div>`;
         }).join("") || '<div class="text-muted text-sm">بدون شیفت</div>'}
       </div>
