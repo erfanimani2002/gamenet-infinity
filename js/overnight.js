@@ -40,6 +40,29 @@ const Overnight = (function () {
     return pt === "wallet" ? "کیف‌پول" : pt === "debt" ? "بدهکاری" : pt === "card" ? "کارتی" : "نقدی";
   }
 
+  // Applies a percentage discount to a price, rounded to the nearest toman.
+  function applyDiscountPct(price, pct) {
+    if (!pct) return price;
+    return Math.round(price * (1 - pct / 100));
+  }
+
+  // Per-reservation lock for item-adding. Utils.guardDoubleClick only disables
+  // <button> elements, but the cafe item picker is a clickable <div>
+  // (.pick-item), so it wouldn't be protected by that alone. Without this,
+  // two rapid clicks both read the same reservation/stock before either write
+  // lands, and the second write silently overwrites the first (lost item,
+  // wrong stock count).
+  let itemAddLocks = new Set();
+  async function withItemLock(id, fn) {
+    if (itemAddLocks.has(id)) return { success: false, alreadyLocked: true };
+    itemAddLocks.add(id);
+    try {
+      return await fn();
+    } finally {
+      itemAddLocks.delete(id);
+    }
+  }
+
   // ---- Derived totals — the ONLY place balances are computed, so every
   // screen and every accounting decision (payment cap, refund cap, writeoff
   // amount) reads from the same numbers. -----------------------------------
@@ -102,7 +125,7 @@ const Overnight = (function () {
     let rows = await Promise.all(reservations.map(async (r) => {
       let totals = computeTotals(r, allTx);
       let customer = customers.find((c) => c.id === r.customerId);
-      let statusClass = r.status === "active" ? "status-busy" : r.status === "completed" ? "status-free" : "status-reserved";
+      let statusClass = r.status === "active" ? "status-busy" : r.status === "completed" ? "status-free" : "status-cancelled";
       return `
         <div class="list-row">
           <span class="row-value">#${r.id}</span>
@@ -159,9 +182,16 @@ const Overnight = (function () {
     await Utils.guardDoubleClick(async () => {
       let customerId = parseInt(document.getElementById("newResCustomer").value) || 0;
       let type = document.getElementById("newResType").value;
-      let entranceFee = parseInt(document.getElementById("newResFee").value) || 0;
+      let baseFee = parseInt(document.getElementById("newResFee").value) || 0;
       let notes = document.getElementById("newResNotes").value.trim();
       if (!customerId) { App.toast("مشتری را انتخاب کنید"); return { success: false }; }
+
+      // Lock the customer's club discount at creation time too — same rule as
+      // the entrance fee itself: a later change to the customer's rank/discount
+      // never touches an already-created reservation.
+      let customer = await DB.get("customers", customerId);
+      let discountPercent = customer ? await Utils.getEffectiveDiscount(customer) : 0;
+      let entranceFee = applyDiscountPct(baseFee, discountPercent);
 
       let reservation = {
         customerId, type, status: "active",
@@ -169,12 +199,13 @@ const Overnight = (function () {
         checkIn: new Date().toISOString(),
         checkOut: null,
         entranceFee, // locked permanently at creation — never re-read from settings again
+        discountPercent, // locked at creation, applied to entrance fee above and to items as they're added
         items: [],
         notes,
         cancelledAt: null, cancelReason: null,
       };
       let id = await DB.add("overnightReservations", reservation);
-      await DB.logActivity("رزرو شب جدید", "رزرو #" + id + " | " + typeLabel(type) + " | ورودی: " + Utils.formatCurrency(entranceFee));
+      await DB.logActivity("رزرو شب جدید", "رزرو #" + id + " | " + typeLabel(type) + " | ورودی: " + Utils.formatCurrency(entranceFee) + (discountPercent > 0 ? " | تخفیف: " + discountPercent + "%" : ""));
       App.toast("رزرو ثبت شد");
       App.closeModalForce();
       refresh();
@@ -230,6 +261,7 @@ const Overnight = (function () {
       ${r.notes ? `<div class="list-row"><span class="row-label">یادداشت</span><span class="row-value">${Utils.escapeHtml(r.notes)}</span></div>` : ""}
       ${r.status === "cancelled" && r.cancelReason ? `<div class="list-row"><span class="row-label">دلیل لغو</span><span class="row-value">${Utils.escapeHtml(r.cancelReason)}</span></div>` : ""}
       <hr class="section-divider">
+      ${r.discountPercent > 0 ? `<div class="list-row"><span class="row-label">تخفیف باشگاه مشتریان</span><span class="row-value amount positive">${r.discountPercent}%</span></div>` : ""}
       <div class="list-row"><span class="row-label">ورودی رزرو شب</span><span class="row-value amount">${Utils.formatCurrency(totals.charges.entrance)}</span></div>
       <div class="list-row"><span class="row-label">جمع آیتم‌ها/غذا</span><span class="row-value amount">${Utils.formatCurrency(totals.charges.items)}</span></div>
       ${totals.charges.other > 0 ? `<div class="list-row"><span class="row-label">سایر هزینه‌ها</span><span class="row-value amount">${Utils.formatCurrency(totals.charges.other)}</span></div>` : ""}
@@ -279,36 +311,45 @@ const Overnight = (function () {
   }
 
   async function addItemClick(id, itemId, source) {
-    let reservation = await DB.get("overnightReservations", id);
-    if (!reservation || reservation.status !== "active") return;
-    let item = await DB.get("cafeItems", itemId);
-    if (!item) return;
-    if (!item.unlimited && item.stock <= 0) { App.toast("موجودی تمام شده"); return; }
+    await withItemLock(id, async () => {
+      let reservation = await DB.get("overnightReservations", id);
+      if (!reservation || reservation.status !== "active") return { success: false };
+      let item = await DB.get("cafeItems", itemId);
+      if (!item) return { success: false };
+      if (!item.unlimited && item.stock <= 0) { App.toast("موجودی تمام شده"); return { success: false }; }
 
-    reservation.items.push({ itemId, name: item.name, price: item.price, qty: 1, type: "cafe", addedAt: new Date().toISOString() });
-    let updatedItem = item.unlimited ? null : { ...item, stock: item.stock - 1 };
+      let price = applyDiscountPct(item.price, reservation.discountPercent || 0);
+      reservation.items.push({ itemId, name: item.name, price, qty: 1, type: "cafe", addedAt: new Date().toISOString() });
+      let updatedItem = item.unlimited ? null : { ...item, stock: item.stock - 1 };
 
-    await DB.runAtomic([
-      { store: "overnightReservations", type: "put", data: reservation },
-      ...(updatedItem ? [{ store: "cafeItems", type: "put", data: updatedItem }] : []),
-    ]);
-    await DB.logActivity("افزودن آیتم به رزرو شب", "رزرو #" + id + " | " + item.name + " | " + Utils.formatCurrency(item.price));
-    App.toast("آیتم اضافه شد");
-    showAddItem(id);
+      await DB.runAtomic([
+        { store: "overnightReservations", type: "put", data: reservation },
+        ...(updatedItem ? [{ store: "cafeItems", type: "put", data: updatedItem }] : []),
+      ]);
+      await DB.logActivity("افزودن آیتم به رزرو شب", "رزرو #" + id + " | " + item.name + " | " + Utils.formatCurrency(price));
+      App.toast("آیتم اضافه شد");
+      showAddItem(id);
+      return { success: true };
+    });
   }
 
   async function addCustomItem(id) {
     let name = document.getElementById("customItemName").value.trim();
-    let price = parseInt(document.getElementById("customItemPrice").value) || 0;
-    if (!name || price <= 0) { App.toast("عنوان و مبلغ معتبر وارد کنید"); return; }
-    let reservation = await DB.get("overnightReservations", id);
-    if (!reservation || reservation.status !== "active") return;
+    let inputPrice = parseInt(document.getElementById("customItemPrice").value) || 0;
+    if (!name || inputPrice <= 0) { App.toast("عنوان و مبلغ معتبر وارد کنید"); return; }
 
-    reservation.items.push({ itemId: null, name, price, qty: 1, type: "other", addedAt: new Date().toISOString() });
-    await DB.put("overnightReservations", reservation);
-    await DB.logActivity("افزودن هزینه دلخواه به رزرو شب", "رزرو #" + id + " | " + name + " | " + Utils.formatCurrency(price));
-    App.toast("هزینه اضافه شد");
-    showAddItem(id);
+    await withItemLock(id, async () => {
+      let reservation = await DB.get("overnightReservations", id);
+      if (!reservation || reservation.status !== "active") return { success: false };
+
+      let price = applyDiscountPct(inputPrice, reservation.discountPercent || 0);
+      reservation.items.push({ itemId: null, name, price, qty: 1, type: "other", addedAt: new Date().toISOString() });
+      await DB.put("overnightReservations", reservation);
+      await DB.logActivity("افزودن هزینه دلخواه به رزرو شب", "رزرو #" + id + " | " + name + " | " + Utils.formatCurrency(price));
+      App.toast("هزینه اضافه شد");
+      showAddItem(id);
+      return { success: true };
+    });
   }
 
   // ---- Payment ---------------------------------------------------------
@@ -513,11 +554,23 @@ const Overnight = (function () {
       }
 
       // Attribute the refund across categories proportionally to what was
-      // actually paid in each category, for reporting purposes only.
+      // actually paid in each category, for reporting purposes only. Rounded
+      // to whole tomans (fractional amounts from a raw proportional split
+      // would otherwise show up in reports), with any rounding remainder put
+      // on the last category so the parts still sum exactly to `amount`.
       let paidTotal = totals.paid.entrance + totals.paid.items + totals.paid.other;
       let categoryBreakdown = { entrance: 0, items: 0, other: 0 };
       if (paidTotal > 0) {
-        CATEGORIES.forEach((c) => { categoryBreakdown[c] = amount * (totals.paid[c] / paidTotal); });
+        let assigned = 0;
+        CATEGORIES.forEach((c, i) => {
+          if (i === CATEGORIES.length - 1) {
+            categoryBreakdown[c] = amount - assigned;
+          } else {
+            let share = Math.round(amount * (totals.paid[c] / paidTotal));
+            categoryBreakdown[c] = share;
+            assigned += share;
+          }
+        });
       } else {
         categoryBreakdown.other = amount;
       }
