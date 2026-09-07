@@ -195,6 +195,27 @@ const Backup = (function () {
         XLSX.utils.book_append_sheet(wb, ws, "جوایز");
       }
 
+      if (data.overnightReservations && data.overnightReservations.length) {
+        let customers = data.customers || [];
+        let allOvernightTx = data.overnightTransactions || [];
+        let ws = XLSX.utils.json_to_sheet(data.overnightReservations.map((r) => {
+          let c = customers.find((cu) => cu.id === r.customerId);
+          let totals = Overnight.computeTotals(r, allOvernightTx);
+          return {
+            "شناسه": c ? "#" + (c.displayId || c.id) : r.customerId,
+            "نوع": r.type === "console" ? "کنسول" : r.type === "billiard" ? "بیلیارد" : "پی‌سی",
+            "وضعیت": r.status === "active" ? "فعال" : r.status === "completed" ? "تکمیل‌شده" : "لغوشده",
+            "ورودی": totals.charges.entrance, "آیتم‌ها": totals.charges.items, "سایر": totals.charges.other,
+            "جمع کل": totals.totalCharges, "پرداخت‌شده": totals.totalPayments,
+            "استردادشده": totals.totalRefunds, "بخشیده‌شده": totals.totalWriteoffs,
+            "مانده": totals.remainingBalance,
+            "ورود": r.checkIn ? Jalali.formatDateTime(r.checkIn) : "",
+            "خروج": r.checkOut ? Jalali.formatDateTime(r.checkOut) : "",
+          };
+        }));
+        XLSX.utils.book_append_sheet(wb, ws, "رزروهای شب");
+      }
+
       XLSX.writeFile(wb, "گیمنت_اینفینیتی_بک‌آپ_" + Jalali.formatDate(new Date()).replace(/\//g, "-") + ".xlsx");
       App.toast("فایل اکسل دانلود شد");
     } catch (e) {

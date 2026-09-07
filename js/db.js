@@ -67,7 +67,24 @@ const DB = (function () {
       request.onerror = () => reject(request.error);
       request.onsuccess = () => {
         db = request.result;
+        // If another tab/window later opens a newer DB_VERSION, IndexedDB
+        // fires "versionchange" on every OTHER open connection first. Without
+        // closing here, this tab keeps the old connection open forever, which
+        // makes the other tab's upgrade request sit in onblocked indefinitely
+        // (see below) — neither tab ever finishes opening the DB again.
+        db.onversionchange = () => {
+          db.close();
+          db = null;
+        };
         resolve(db);
+      };
+      // Fires when an open() with a higher DB_VERSION is blocked by this (or
+      // another) tab's connection that hasn't closed yet. Without this handler
+      // the blocked open() request just sits there — neither resolving nor
+      // rejecting — which looks like the app has silently frozen after an
+      // update, until every other tab of the app is manually closed.
+      request.onblocked = () => {
+        console.warn("IndexedDB upgrade blocked by another open tab of this app. Close other tabs/windows and reload.");
       };
 
       request.onupgradeneeded = (event) => {
