@@ -285,6 +285,39 @@ const App = (function () {
     }, 2500);
   }
 
+  // Persistent warnings: unlike toast() (auto-hides after 2.5s), these stay on
+  // screen until the underlying problem clears itself (caller calls
+  // clearPersistentWarning) or the user manually dismisses them with "×".
+  // `key` identifies the warning so calling showPersistentWarning again with
+  // the same key updates the existing banner in place instead of stacking a
+  // duplicate — used e.g. by the auto-backup failure warning, which re-fires
+  // on every failed retry.
+  function showPersistentWarning(key, html) {
+    let container = document.getElementById("persistentWarnings");
+    if (!container) return;
+    let existing = container.querySelector(`[data-warning-key="${key}"]`);
+    let body = existing ? existing.querySelector(".persistent-warning-body") : null;
+    if (body) {
+      body.innerHTML = html;
+      return;
+    }
+    let el = document.createElement("div");
+    el.className = "persistent-warning";
+    el.dataset.warningKey = key;
+    el.innerHTML = `
+      <div class="persistent-warning-body">${html}</div>
+      <button class="persistent-warning-close" onclick="App.clearPersistentWarning('${key}')" title="بستن">×</button>
+    `;
+    container.appendChild(el);
+  }
+
+  function clearPersistentWarning(key) {
+    let container = document.getElementById("persistentWarnings");
+    if (!container) return;
+    let existing = container.querySelector(`[data-warning-key="${key}"]`);
+    if (existing) existing.remove();
+  }
+
   function startTimer(id, callback) {
     stopTimer(id);
     timerIntervals[id] = setInterval(callback, 1000);
@@ -342,6 +375,8 @@ const App = (function () {
     closeModal,
     closeModalForce,
     toast,
+    showPersistentWarning,
+    clearPersistentWarning,
     startTimer,
     stopTimer,
     stopAllTimers,

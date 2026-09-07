@@ -1,4 +1,33 @@
 const Backup = (function () {
+  // Tracks the outcome of the automatic (every-10-minutes) backup so both the
+  // Backup tab and a persistent warning banner (see showBackupFailureWarning)
+  // can reflect it. In-memory only — resets on page reload, which is fine
+  // since writeAutoBackup() runs again shortly after every reload/login.
+  let backupStatus = { lastSuccessAt: null, lastFailureAt: null, lastError: null, consecutiveFailures: 0 };
+
+  function renderAutoBackupStatus() {
+    let failedMoreRecently = backupStatus.lastFailureAt &&
+      (!backupStatus.lastSuccessAt || backupStatus.lastFailureAt > backupStatus.lastSuccessAt);
+
+    if (failedMoreRecently) {
+      return `
+        <div class="alert-box alert-warning" style="margin-bottom:12px;">
+          <div><strong>بکاپ خودکار ناموفق بود</strong> (آخرین تلاش: ${Jalali.formatDateTime(backupStatus.lastFailureAt)})</div>
+          <div class="text-sm">خطا: ${Utils.escapeHtml(backupStatus.lastError || '')}</div>
+          <button class="btn btn-sm btn-outline mt-2" onclick="Backup.retryAutoBackup()">تلاش مجدد</button>
+        </div>
+      `;
+    }
+    if (backupStatus.lastSuccessAt) {
+      return `
+        <div class="text-muted text-sm" style="margin-bottom:12px;">
+          آخرین بکاپ خودکار موفق: ${Jalali.formatDateTime(backupStatus.lastSuccessAt)}
+        </div>
+      `;
+    }
+    return "";
+  }
+
   async function render(el) {
     let html = `
       <div class="card">
@@ -13,6 +42,7 @@ const Backup = (function () {
         <hr class="section-divider">
         <div class="report-section">
           <h3>پشتیبان کامل (JSON)</h3>
+          ${renderAutoBackupStatus()}
           <p class="text-muted text-sm mb-2">فایل JSON شامل تمام داده‌های اپ قابل بازیابی</p>
           <div class="flex-gap">
             <button class="btn btn-primary" onclick="Backup.exportJSON()">دانلود بک‌آپ</button>
@@ -23,6 +53,11 @@ const Backup = (function () {
       </div>
     `;
     el.innerHTML = html;
+  }
+
+  function refresh() {
+    let el = document.getElementById("tab-backup");
+    if (el && el.classList.contains("active")) render(el);
   }
 
   async function exportExcel() {
@@ -222,10 +257,38 @@ const Backup = (function () {
       });
       if (!res.ok) throw new Error("backup http " + res.status);
       await DB.logActivity("بک‌آپ خودکار", new Date().toLocaleTimeString("fa-IR"));
+
+      backupStatus.lastSuccessAt = new Date().toISOString();
+      backupStatus.consecutiveFailures = 0;
+      backupStatus.lastError = null;
+      App.clearPersistentWarning("backup");
+      refresh();
     } catch (e) {
       console.error("auto backup failed", e);
+      backupStatus.lastFailureAt = new Date().toISOString();
+      backupStatus.lastError = e.message || String(e);
+      backupStatus.consecutiveFailures++;
+      showBackupFailureWarning();
+      refresh();
     }
   }
 
-  return { render, exportExcel, exportJSON, triggerImport, importJSON, writeAutoBackup };
+  // Persistent (not auto-hiding) banner so a silently-failing 10-minute auto
+  // backup can't go unnoticed. Re-fires on every failed retry, but
+  // App.showPersistentWarning replaces the existing "backup"-keyed banner in
+  // place rather than stacking a new one each time.
+  function showBackupFailureWarning() {
+    App.showPersistentWarning("backup", `
+      <strong>⚠ بکاپ خودکار ناموفق بود</strong>
+      <div>آخرین خطا: ${Utils.escapeHtml(backupStatus.lastError || "")}</div>
+      <div>راه‌حل پیشنهادی: مطمئن شوید سرور برنامه در حال اجراست (فایل start-app.bat را دوباره اجرا کنید)، یا برنامه را ببندید و دوباره باز کنید.</div>
+      <button class="btn btn-sm btn-outline mt-2" onclick="Backup.retryAutoBackup()">تلاش مجدد</button>
+    `);
+  }
+
+  async function retryAutoBackup() {
+    await writeAutoBackup();
+  }
+
+  return { render, exportExcel, exportJSON, triggerImport, importJSON, writeAutoBackup, retryAutoBackup, refresh };
 })();

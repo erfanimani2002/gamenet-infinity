@@ -1303,6 +1303,48 @@ canvas { width: 100% !important; max-height: 300px; }
 .alert-info { background: var(--info-bg); color: var(--info-ink); border: 1px solid rgba(2, 132, 199, 0.22); }
 
 /* =====================================================
+   PERSISTENT WARNINGS
+   ===================================================== */
+#persistentWarnings {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 998; /* below modalOverlay/toast, but above normal content */
+  display: flex;
+  flex-direction: column;
+  pointer-events: none; /* clicks pass through the empty space around banners */
+}
+
+.persistent-warning {
+  pointer-events: auto;
+  background: var(--warning-bg);
+  color: var(--warning-ink);
+  border-bottom: 1px solid rgba(217, 119, 6, 0.25);
+  padding: 10px 20px;
+  font-size: 13px;
+  line-height: 1.7;
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  animation: fadeInUp var(--duration-md) var(--ease);
+}
+
+.persistent-warning .persistent-warning-body { flex: 1; }
+.persistent-warning .persistent-warning-body strong { display: block; margin-bottom: 2px; }
+.persistent-warning .persistent-warning-close {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+  color: inherit;
+  opacity: 0.7;
+  padding: 2px 4px;
+}
+.persistent-warning .persistent-warning-close:hover { opacity: 1; }
+
+/* =====================================================
    TOAST
    ===================================================== */
 .toast {
