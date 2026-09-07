@@ -750,7 +750,14 @@ const Reports = (function () {
         return { success: true, payType: "debt" };
       } else {
         customer.totalPaid = (customer.totalPaid || 0) + newAmount;
-        let payBreakdown = oldPayType === "wallet" ? { wallet: newAmount, debt: 0, cash: 0, card: 0 } : oldBreakdown;
+        // Always derive the breakdown from the NEW method/amount, never from
+        // oldPayType/oldBreakdown: reusing the old wallet leg here (or an old
+        // amount) would tag cash/card money as a wallet leg, or keep a stale
+        // amount, and corrupt the customer's wallet/totalPaid on a later
+        // edit or delete (reversePayment reads payBreakdown, not payType).
+        let payBreakdown = newPayType === "card"
+          ? { wallet: 0, debt: 0, cash: 0, card: newAmount }
+          : { wallet: 0, debt: 0, cash: newAmount, card: 0 };
         return { success: true, payType: newPayType, payBreakdown };
       }
     })(customer);
