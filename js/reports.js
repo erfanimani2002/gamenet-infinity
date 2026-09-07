@@ -646,11 +646,13 @@ const Reports = (function () {
     await DB.put("customers", customer);
   }
 
-  // Atomic reverse + re-apply: reads the customer once, mutates in memory,
-  // and writes back in a single runAtomic transaction so a crash between the
-  // reverse and the re-apply can never corrupt the customer's balance.
+  // Reverse + re-apply: reads the customer once, mutates in memory, and
+  // writes back with a single DB.put so the reverse and re-apply land together.
+  // (DB.runAtomic only supports an array of {store,type,data} ops — it has no
+  // read-mutate-write / callback form, so we use DB.get + DB.put here instead.)
   async function reverseAndReapply(customerId, oldAmount, oldPayType, oldBreakdown, newAmount, newPayType) {
-    return await DB.runAtomic("customers", customerId, (customer) => {
+    let customer = await DB.get("customers", customerId);
+    let result = (function (customer) {
       if (!customer) return { success: false, reason: "not_found" };
 
       // 1. Reverse old payment
@@ -699,14 +701,19 @@ const Reports = (function () {
         let payBreakdown = oldPayType === "wallet" ? { wallet: newAmount, debt: 0, cash: 0, card: 0 } : oldBreakdown;
         return { success: true, payType: newPayType, payBreakdown };
       }
-    });
+    })(customer);
+    if (result && result.success && customer) {
+      await DB.put("customers", customer);
+    }
+    return result;
   }
 
   // Atomic reverse + re-apply for split payments: reverses the old breakdown,
   // then re-applies the same breakdown scaled to the new amount. If the wallet
   // leg fails, rolls back and returns failure.
   async function reverseAndReapplySplit(customerId, oldAmount, oldBreakdown, newAmount) {
-    return await DB.runAtomic("customers", customerId, (customer) => {
+    let customer = await DB.get("customers", customerId);
+    let result = (function (customer) {
       if (!customer) return { success: false, reason: "not_found" };
 
       // 1. Reverse old breakdown
@@ -735,7 +742,11 @@ const Reports = (function () {
       if (nd) { customer.debt = (customer.debt || 0) + nd; }
       if (nc || ncd) { customer.totalPaid = (customer.totalPaid || 0) + nc + ncd; }
       return { success: true, payType: "wallet", payBreakdown: { wallet: nw, debt: nd, cash: nc, card: ncd } };
-    });
+    })(customer);
+    if (result && result.success && customer) {
+      await DB.put("customers", customer);
+    }
+    return result;
   }
 
   async function editTransaction(txType, txId) {
