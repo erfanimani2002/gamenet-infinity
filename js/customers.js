@@ -137,9 +137,8 @@ const Customers = (function () {
     let payments = await DB.getByIndex("debtPayments", "by_customer", id);
     let charges = await DB.getByIndex("walletCharges", "by_customer", id);
     let effectiveDiscount = await Utils.getEffectiveDiscount(c);
-    let clubSettings = await DB.getSetting("customerClub", { categories: [], tierDiscounts: {} });
-    let rank = CustomerClub.computeRank(c.totalPaid || 0, clubSettings.categories || []);
-    let rankLabel = rank ? rank.category + " " + rank.tier : "—";
+    let rank = await CustomerClub.getRankForCustomer(c);
+    let rankLabel = rank ? rank.category : "—";
 
     // Past settled sessions this customer attended (listed in `ids`) or paid
     // for (settlePayerId), most-recent first, capped to keep the modal tidy.
@@ -444,7 +443,7 @@ const Customers = (function () {
       <div class="form-group"><label>تلفن (اختیاری)</label><input type="text" id="qcPhone" placeholder="تلفن"></div>
       <div class="modal-actions">
         <button class="btn btn-success" onclick="Customers.confirmQuickCreate()">ساخت</button>
-        <button class="btn btn-outline" onclick="App.closeModalForce()">انصراف</button>
+        <button class="btn btn-outline" onclick="window.__quickCreateCallback = null; App.closeModalForce()">انصراف</button>
       </div>
     `);
   }

@@ -60,7 +60,13 @@ http.createServer((req, res) => {
     return;
   }
 
-  let u = decodeURIComponent((req.url || "/").split("?")[0]);
+  let u;
+  try {
+    u = decodeURIComponent((req.url || "/").split("?")[0]);
+  } catch (e) {
+    res.writeHead(400);
+    return res.end("bad request");
+  }
   if (u === "/") u = "/index.html";
   const file = path.resolve(ROOT, "." + u);
   if (!file.startsWith(ROOT)) {

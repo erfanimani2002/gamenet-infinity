@@ -233,94 +233,77 @@ const AdminPanel = (function () {
   }
 
   async function renderClubConfig(el) {
-    let club = await DB.getSetting("customerClub", { categories: [], tierDiscounts: {} });
+    let club = await DB.getSetting("customerClub", { categories: [] });
     let categories = club.categories || [];
-    let tierDiscounts = club.tierDiscounts || {};
 
     let html = categories.map((cat, ci) => {
-      let tiers = [];
-      for (let t = 0; t < (cat.tiers || 0); t++) {
-        let threshold = (cat.baseThreshold || 0) + t * (cat.thresholdStep || 0);
-        let key = cat.name + "_" + (t + 1);
-        let disc = tierDiscounts[key] || 0;
-        tiers.push(`
-          <tr>
-            <td>${Utils.escapeHtml(cat.name)} ${t + 1}</td>
-            <td>${Utils.formatCurrency(threshold)}</td>
-            <td><input type="number" class="club-disc-input" data-ci="${ci}" data-tier="${t}" value="${disc}" min="0" max="100" style="width:70px"></td>
-          </tr>
-        `);
-      }
       return `
-        <div style="margin-bottom:16px">
-          <div class="form-inline" style="align-items:flex-end;gap:8px;margin-bottom:8px">
+        <div class="club-cat-block" style="margin-bottom:16px;padding:12px;border:1px solid var(--border);border-radius:var(--radius)">
+          <div class="form-inline" style="align-items:flex-end;gap:8px;flex-wrap:wrap">
             <div class="form-group">
               <label>نام دسته</label>
               <input type="text" class="club-cat-name" data-ci="${ci}" value="${Utils.escapeHtml(cat.name)}">
             </div>
             <div class="form-group">
-              <label>تعداد درجه‌ها</label>
-              <input type="number" class="club-cat-tiers" data-ci="${ci}" value="${cat.tiers || 10}" min="1" max="50" style="width:70px">
-            </div>
-            <div class="form-group">
-              <label>آستانه پایه</label>
-              <input type="number" class="club-cat-base" data-ci="${ci}" value="${cat.baseThreshold || 0}" min="0" style="width:120px">
-            </div>
-            <div class="form-group">
-              <label>گام افزایش</label>
-              <input type="number" class="club-cat-step" data-ci="${ci}" value="${cat.thresholdStep || 0}" min="0" style="width:120px">
-            </div>
-            <div class="form-group">
               <label>رنگ</label>
               <input type="color" class="club-cat-color" data-ci="${ci}" value="${cat.color || '#999'}" style="width:40px;height:32px;padding:2px">
             </div>
+            <div class="form-group">
+              <label>تعداد نفرات</label>
+              <input type="number" class="club-cat-slots" data-ci="${ci}" value="${cat.slots || 0}" min="0" style="width:70px">
+            </div>
+            <div class="form-group">
+              <label>تخفیف %</label>
+              <input type="number" class="club-cat-discount" data-ci="${ci}" value="${cat.discount || 0}" min="0" max="100" style="width:70px">
+            </div>
+            <button class="btn btn-danger btn-sm" onclick="AdminPanel.removeClubCategory(${ci})" style="margin-bottom:2px">حذف</button>
           </div>
-          <table style="width:100%;font-size:0.85rem;border-collapse:collapse">
-            <thead><tr><th style="text-align:right;padding:4px 8px">درجه</th><th style="text-align:right;padding:4px 8px">آستانه</th><th style="text-align:right;padding:4px 8px">تخفیف %</th></tr></thead>
-            <tbody>${tiers.join("")}</tbody>
-          </table>
         </div>
       `;
     }).join("");
 
-    el.innerHTML = html + `<button class="btn btn-primary mt-2" onclick="AdminPanel.saveCustomerClub()">ذخیره تنظیمات باشگاه</button>`;
+    el.innerHTML = `
+      ${html}
+      <button class="btn btn-secondary mt-2" onclick="AdminPanel.addClubCategory()">+ افزودن دسته</button>
+      <button class="btn btn-primary mt-2" onclick="AdminPanel.saveCustomerClub()">ذخیره تنظیمات باشگاه</button>
+    `;
+  }
+
+  async function addClubCategory() {
+    let club = await DB.getSetting("customerClub", { categories: [] });
+    let categories = club.categories || [];
+    categories.push({ name: "دسته جدید", color: "#6366f1", slots: 0, discount: 0 });
+    await DB.setSetting("customerClub", { categories });
+    refresh();
+  }
+
+  async function removeClubCategory(ci) {
+    let club = await DB.getSetting("customerClub", { categories: [] });
+    let categories = club.categories || [];
+    if (ci < 0 || ci >= categories.length) return;
+    categories.splice(ci, 1);
+    await DB.setSetting("customerClub", { categories });
+    refresh();
   }
 
   async function saveCustomerClub() {
-    let club = await DB.getSetting("customerClub", { categories: [], tierDiscounts: {} });
+    let club = await DB.getSetting("customerClub", { categories: [] });
     let oldCategories = club.categories || [];
 
-    // Build new categories from form inputs.
     let newCategories = oldCategories.map((cat, ci) => {
       let nameEl = document.querySelector(`.club-cat-name[data-ci="${ci}"]`);
-      let tiersEl = document.querySelector(`.club-cat-tiers[data-ci="${ci}"]`);
-      let baseEl = document.querySelector(`.club-cat-base[data-ci="${ci}"]`);
-      let stepEl = document.querySelector(`.club-cat-step[data-ci="${ci}"]`);
       let colorEl = document.querySelector(`.club-cat-color[data-ci="${ci}"]`);
+      let slotsEl = document.querySelector(`.club-cat-slots[data-ci="${ci}"]`);
+      let discountEl = document.querySelector(`.club-cat-discount[data-ci="${ci}"]`);
       return {
         name: nameEl ? nameEl.value.trim() || cat.name : cat.name,
         color: colorEl ? colorEl.value : cat.color,
-        tiers: parseInt(tiersEl ? tiersEl.value : cat.tiers) ?? 10,
-        baseThreshold: parseInt(baseEl ? baseEl.value : cat.baseThreshold) ?? 0,
-        thresholdStep: parseInt(stepEl ? stepEl.value : cat.thresholdStep) ?? 0,
+        slots: parseInt(slotsEl ? slotsEl.value : cat.slots) ?? 0,
+        discount: parseInt(discountEl ? discountEl.value : cat.discount) ?? 0,
       };
     });
 
-    // Remap tier discounts: each input's data-key uses the OLD category name,
-    // but we need to save under the NEW name (which may have changed).
-    let tierDiscounts = {};
-    document.querySelectorAll(".club-disc-input").forEach((el) => {
-      let ci = parseInt(el.dataset.ci);
-      let tierIndex = parseInt(el.dataset.tier);
-      let discount = parseInt(el.value) ?? 0;
-      let newCat = newCategories[ci];
-      if (newCat) {
-        let newKey = newCat.name + "_" + (tierIndex + 1);
-        tierDiscounts[newKey] = discount;
-      }
-    });
-
-    await DB.setSetting("customerClub", { categories: newCategories, tierDiscounts });
+    await DB.setSetting("customerClub", { categories: newCategories });
     await DB.logActivity("ذخیره تنظیمات باشگاه", "تعداد دسته‌ها: " + newCategories.length);
     App.toast("تنظیمات باشگاه ذخیره شد");
     refresh();
@@ -331,5 +314,5 @@ const AdminPanel = (function () {
     if (el && el.classList.contains("active")) render(el);
   }
 
-  return { render, savePricing, saveCustomerClub, addDevice, editDevice, saveDevice, deleteDevice, addUser, saveUser, refresh };
+  return { render, savePricing, saveCustomerClub, addClubCategory, removeClubCategory, addDevice, editDevice, saveDevice, deleteDevice, addUser, saveUser, refresh };
 })();

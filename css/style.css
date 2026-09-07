@@ -1779,36 +1779,14 @@ canvas { width: 100% !important; max-height: 300px; }
 .device-list .device-status { flex: 1; display: flex; align-items: center; gap: 8px; min-width: 0; flex-wrap: wrap; }
 .device-list .device-actions { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
 
-/* Club: grid becomes single-column list of rich rows */
-.club-grid {
-  display: flex;
-  flex-direction: column;
-  gap: 0;
-  background: var(--bg-card);
-  border: 1px solid var(--border-light);
-  border-radius: var(--radius);
-  overflow: hidden;
+@media (max-width: 1024px) {
+  :root { --sidebar-w: 180px; }
+  .main-content { padding: 14px; }
+  .device-list .device-item { flex-wrap: wrap; }
+  .device-list .device-actions { justify-content: flex-start; width: 100%; }
+  .report-summary { gap: 10px; }
+  .club-card { grid-template-columns: 1fr; grid-template-areas: "header" "stats" "info"; }
 }
-
-.club-card {
-  background: transparent;
-  border: none;
-  border-bottom: 1px solid var(--border-light);
-  border-radius: 0;
-  padding: 12px 14px;
-  display: grid;
-  grid-template-columns: 1fr auto;
-  grid-template-areas: "header rank" "stats stats" "info info";
-  gap: 8px 12px;
-  cursor: pointer;
-  transition: background var(--duration) var(--ease);
-}
-
-.club-card:last-child { border-bottom: none; }
-.club-card:hover { border-color: var(--border-light); box-shadow: none; background: var(--bg-hover); transform: none; }
-.club-card-header { margin-bottom: 0; }
-.club-card-stats { margin-bottom: 0; }
-.club-card-info { padding-top: 8px; border-top: 1px dashed var(--border-light); }
 
 /* Games managed lists: cards become list rows */
 .item-grid.is-list,

@@ -1004,6 +1004,8 @@ const Tournaments = (function () {
 
     if (isNaN(scoreA) || isNaN(scoreB)) { App.toast("نتایج را وارد کنید"); return; }
 
+    let oldWinner = match.winner;
+
     match.scoreA = scoreA;
     match.scoreB = scoreB;
 
@@ -1018,7 +1020,27 @@ const Tournaments = (function () {
     match.status = "completed";
     await DB.put("matches", match);
 
-    await advanceWinner(match);
+    if (oldWinner && !match.winner) {
+      let tournament = await DB.get("tournaments", match.tournamentId);
+      if (tournament && tournament.bracketType === "elimination") {
+        let allMatches;
+        try { allMatches = await DB.getByIndex("matches", "by_tournament", match.tournamentId); } catch (e) { allMatches = (await DB.getAll("matches")).filter((m) => m.tournamentId === match.tournamentId); }
+        let nextRound = match.round + 1;
+        let nextMatchIdx = Math.floor(match.matchIndex / 2);
+        let nextMatch = allMatches.find((m) => m.round === nextRound && m.matchIndex === nextMatchIdx);
+        if (nextMatch) {
+          if (match.matchIndex % 2 === 0) {
+            nextMatch.playerA = null;
+          } else {
+            nextMatch.playerB = null;
+          }
+          await DB.put("matches", nextMatch);
+        }
+      }
+    } else {
+      await advanceWinner(match);
+    }
+
     App.toast("نتیجه ثبت شد");
     openMatch(matchId);
   }

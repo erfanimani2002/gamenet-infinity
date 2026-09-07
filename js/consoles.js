@@ -568,7 +568,8 @@ const Consoles = (function () {
     }
     if (item) {
       await DB.put("sessions", session);
-      await DB.logActivity("افزودن آیتم", item.name + " به سشن #" + session.id + " | " + Utils.formatCurrency(item.price));
+      let lastItem = session.items[session.items.length - 1];
+      await DB.logActivity("افزودن آیتم", item.name + " به سشن #" + session.id + " | " + Utils.formatCurrency(lastItem ? lastItem.price : 0));
       App.toast("آیتم اضافه شد");
       showSessionDetail(deviceId);
     }

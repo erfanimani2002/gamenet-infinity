@@ -8,23 +8,29 @@ const CustomerClub = (function () {
   const interestLabels = { billiard: "بیلیارد", console: "کنسول", cs: "سی‌اس" };
   const interestIcons = { billiard: "", console: "", cs: "" };
 
-  function computeRank(totalPaid, categories) {
-    let best = null;
+  function computeAllRanks(customers, categories) {
+    let sorted = [...customers].sort((a, b) => (b.totalPaid || 0) - (a.totalPaid || 0));
+    let ranks = {};
+    let pos = 0;
     for (let cat of categories) {
-      for (let t = 0; t < (cat.tiers || 0); t++) {
-        let threshold = (cat.baseThreshold || 0) + t * (cat.thresholdStep || 0);
-        if (totalPaid >= threshold && (!best || threshold > best.threshold)) {
-          best = { category: cat.name, tier: t + 1, color: cat.color, threshold };
-        }
+      for (let i = 0; i < (cat.slots || 0); i++) {
+        if (pos >= sorted.length) break;
+        ranks[sorted[pos].id] = {
+          category: cat.name, color: cat.color,
+          discount: cat.discount || 0, position: pos + 1,
+        };
+        pos++;
       }
     }
-    return best;
+    return ranks;
   }
 
-  function getRankDiscount(rank, categories, tierDiscounts) {
-    if (!rank) return 0;
-    let key = rank.category + "_" + rank.tier;
-    return tierDiscounts[key] || 0;
+  function computeRank(customerId, ranksMap) {
+    return ranksMap[customerId] || null;
+  }
+
+  function getRankDiscount(rank) {
+    return rank ? (rank.discount || 0) : 0;
   }
 
   function computeStats(customers, sessions) {
@@ -39,8 +45,9 @@ const CustomerClub = (function () {
     let dist = {};
     categories.forEach((c) => { dist[c.name] = 0; });
     dist["ندارد"] = 0;
+    let ranks = computeAllRanks(customers, categories);
     customers.forEach((c) => {
-      let rank = computeRank(c.totalPaid || 0, categories);
+      let rank = ranks[c.id];
       if (rank) { dist[rank.category] = (dist[rank.category] || 0) + 1; }
       else { dist["ندارد"] = (dist["ندارد"] || 0) + 1; }
     });
@@ -65,15 +72,15 @@ const CustomerClub = (function () {
     return map;
   }
 
-  function renderCard(c, sessions, categories, tierDiscounts) {
-    let rank = computeRank(c.totalPaid || 0, categories);
-    let rankDiscount = getRankDiscount(rank, categories, tierDiscounts);
+  function renderCard(c, sessions, ranksMap) {
+    let rank = ranksMap[c.id] || null;
+    let rankDiscount = getRankDiscount(rank);
     let effectiveDiscount = Math.max(c.discount || 0, rankDiscount);
     let ss = getSessionStats(c.id, sessions);
     let interests = (c.tournamentInterests || []);
 
     let rankBadge = rank
-      ? `<span class="rank-badge" style="background:${Utils.escapeHtml(rank.color)};color:#fff">${Utils.escapeHtml(rank.category)} ${rank.tier}</span>`
+      ? `<span class="rank-badge" style="background:${Utils.escapeHtml(rank.color)};color:#fff">${Utils.escapeHtml(rank.category)}</span>`
       : `<span class="rank-badge rank-none">بدون رتبه</span>`;
 
     let interestChips = interests.length > 0
@@ -110,10 +117,10 @@ const CustomerClub = (function () {
   async function render(el) {
     let customers = await DB.getAll("customers");
     let sessions = await DB.getAll("sessions");
-    let clubSettings = await DB.getSetting("customerClub", { categories: [], tierDiscounts: {} });
+    let clubSettings = await DB.getSetting("customerClub", { categories: [] });
     let categories = clubSettings.categories || [];
-    let tierDiscounts = clubSettings.tierDiscounts || {};
 
+    let ranksMap = computeAllRanks(customers, categories);
     let stats = computeStats(customers, sessions);
     let dist = getCategoryDistribution(customers, categories);
     let sessionStatsMap = buildSessionStatsMap(customers, sessions);
@@ -128,7 +135,7 @@ const CustomerClub = (function () {
         if (!name.includes(q) && !did.includes(q)) return false;
       }
       if (currentRankFilter) {
-        let rank = computeRank(c.totalPaid || 0, categories);
+        let rank = ranksMap[c.id];
         let rankName = rank ? rank.category : "__none__";
         if (rankName !== currentRankFilter) return false;
       }
@@ -152,7 +159,7 @@ const CustomerClub = (function () {
     let rankOptions = categories.map((c) => `<option value="${Utils.escapeHtml(c.name)}" ${currentRankFilter === c.name ? "selected" : ""}>${Utils.escapeHtml(c.name)}</option>`).join("");
     let interestOptions = allInterests.map((i) => `<option value="${i}" ${currentInterestFilter === i ? "selected" : ""}>${interestLabels[i]}</option>`).join("");
 
-    let cardsHtml = filtered.map((c) => renderCard(c, sessions, categories, tierDiscounts)).join("");
+    let cardsHtml = filtered.map((c) => renderCard(c, sessions, ranksMap)).join("");
 
     let distHtml = Object.entries(dist).map(([name, count]) =>
       `<div class="dist-bar"><span class="dist-label">${Utils.escapeHtml(name)}</span><div class="dist-track"><div class="dist-fill" style="width:${stats.totalCustomers > 0 ? Math.round(count / stats.totalCustomers * 100) : 0}%"></div></div><span class="dist-count">${count}</span></div>`
@@ -162,15 +169,15 @@ const CustomerClub = (function () {
     let topBySessions = [...customers].sort((a, b) => (sessionStatsMap[b.id]?.count || 0) - (sessionStatsMap[a.id]?.count || 0)).slice(0, 10);
 
     let leaderboardSpendingHtml = topBySpending.map((c, i) => {
-      let rank = computeRank(c.totalPaid || 0, categories);
-      let badge = rank ? `<span class="rank-badge rank-sm" style="background:${Utils.escapeHtml(rank.color)}">${Utils.escapeHtml(rank.category)} ${rank.tier}</span>` : "";
+      let rank = ranksMap[c.id];
+      let badge = rank ? `<span class="rank-badge rank-sm" style="background:${Utils.escapeHtml(rank.color)}">${Utils.escapeHtml(rank.category)}</span>` : "";
       return `<div class="list-row"><span class="row-label">#${i + 1} ${Utils.escapeHtml(c.firstName)} ${Utils.escapeHtml(c.lastName)} ${badge}</span><span class="row-value">${Utils.formatCurrency(c.totalPaid || 0)}</span></div>`;
     }).join("");
 
     let leaderboardSessionsHtml = topBySessions.map((c, i) => {
       let ss = sessionStatsMap[c.id];
-      let rank = computeRank(c.totalPaid || 0, categories);
-      let badge = rank ? `<span class="rank-badge rank-sm" style="background:${Utils.escapeHtml(rank.color)}">${Utils.escapeHtml(rank.category)} ${rank.tier}</span>` : "";
+      let rank = ranksMap[c.id];
+      let badge = rank ? `<span class="rank-badge rank-sm" style="background:${Utils.escapeHtml(rank.color)}">${Utils.escapeHtml(rank.category)}</span>` : "";
       return `<div class="list-row"><span class="row-label">#${i + 1} ${Utils.escapeHtml(c.firstName)} ${Utils.escapeHtml(c.lastName)} ${badge}</span><span class="row-value">${ss ? ss.count : 0} جلسه</span></div>`;
     }).join("");
 
@@ -250,11 +257,20 @@ const CustomerClub = (function () {
   }
 
   async function getRankDiscountForCustomer(customer) {
-    let clubSettings = await DB.getSetting("customerClub", { categories: [], tierDiscounts: {} });
+    let customers = await DB.getAll("customers");
+    let clubSettings = await DB.getSetting("customerClub", { categories: [] });
     let categories = clubSettings.categories || [];
-    let tierDiscounts = clubSettings.tierDiscounts || {};
-    let rank = computeRank(customer.totalPaid || 0, categories);
-    return getRankDiscount(rank, categories, tierDiscounts);
+    let ranksMap = computeAllRanks(customers, categories);
+    let rank = ranksMap[customer.id] || null;
+    return getRankDiscount(rank);
+  }
+
+  async function getRankForCustomer(customer) {
+    let customers = await DB.getAll("customers");
+    let clubSettings = await DB.getSetting("customerClub", { categories: [] });
+    let categories = clubSettings.categories || [];
+    let ranksMap = computeAllRanks(customers, categories);
+    return ranksMap[customer.id] || null;
   }
 
   function refresh() {
@@ -264,6 +280,7 @@ const CustomerClub = (function () {
 
   return {
     render, refresh, switchSubTab, onSearch, onRankFilter, onInterestFilter, onSort,
-    openProfile, getRankDiscountForCustomer, computeRank, getRankDiscount,
+    openProfile, getRankDiscountForCustomer, getRankForCustomer,
+    computeAllRanks, computeRank, getRankDiscount,
   };
 })();

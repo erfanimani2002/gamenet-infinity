@@ -436,7 +436,7 @@ const Billiard = (function () {
       item = await DB.get("penaltyItems", itemId);
       if (item) { let price = item.type === "penalty" ? item.amount : -item.amount; session.items.push({ itemId, name: item.name, price, qty: 1, type: item.type }); }
     }
-    if (item) { await DB.put("sessions", session); await DB.logActivity("افزودن آیتم به بیلیارد", item.name + " به سشن #" + session.id + " | " + Utils.formatCurrency(item.price)); App.toast("اضافه شد"); showSessionDetail(deviceId); }
+    if (item) { await DB.put("sessions", session); let lastItem = session.items[session.items.length - 1]; await DB.logActivity("افزودن آیتم به بیلیارد", item.name + " به سشن #" + session.id + " | " + Utils.formatCurrency(lastItem ? lastItem.price : 0)); App.toast("اضافه شد"); showSessionDetail(deviceId); }
   }
 
   async function transferSession(deviceId) {

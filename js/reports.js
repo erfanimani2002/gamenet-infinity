@@ -646,6 +646,98 @@ const Reports = (function () {
     await DB.put("customers", customer);
   }
 
+  // Atomic reverse + re-apply: reads the customer once, mutates in memory,
+  // and writes back in a single runAtomic transaction so a crash between the
+  // reverse and the re-apply can never corrupt the customer's balance.
+  async function reverseAndReapply(customerId, oldAmount, oldPayType, oldBreakdown, newAmount, newPayType) {
+    return await DB.runAtomic("customers", customerId, (customer) => {
+      if (!customer) return { success: false, reason: "not_found" };
+
+      // 1. Reverse old payment
+      if (oldBreakdown && typeof oldBreakdown === "object") {
+        let w = oldBreakdown.wallet || 0, d = oldBreakdown.debt || 0;
+        let other = (oldBreakdown.cash || 0) + (oldBreakdown.card || 0);
+        if (w) { customer.wallet = (customer.wallet || 0) + w; customer.totalPaid = Math.max(0, (customer.totalPaid || 0) - w); }
+        if (d) { customer.debt = Math.max(0, (customer.debt || 0) - d); }
+        if (other) { customer.totalPaid = Math.max(0, (customer.totalPaid || 0) - other); }
+      } else if (oldPayType === "wallet") {
+        customer.wallet = (customer.wallet || 0) + oldAmount;
+        customer.totalPaid = Math.max(0, (customer.totalPaid || 0) - oldAmount);
+      } else if (oldPayType === "debt") {
+        customer.debt = Math.max(0, (customer.debt || 0) - oldAmount);
+      } else {
+        customer.totalPaid = Math.max(0, (customer.totalPaid || 0) - oldAmount);
+      }
+
+      // 2. Apply new payment
+      if (newPayType === "wallet") {
+        if ((customer.wallet || 0) < newAmount) {
+          // Rollback: re-apply old
+          if (oldBreakdown && typeof oldBreakdown === "object") {
+            let w = oldBreakdown.wallet || 0, d = oldBreakdown.debt || 0, c = oldBreakdown.cash || 0, cd = oldBreakdown.card || 0;
+            if (w) { customer.wallet = Math.max(0, (customer.wallet || 0) - w); customer.totalPaid = (customer.totalPaid || 0) + w; }
+            if (d) { customer.debt = (customer.debt || 0) + d; }
+            if (c || cd) { customer.totalPaid = (customer.totalPaid || 0) + c + cd; }
+          } else if (oldPayType === "wallet") {
+            customer.wallet = Math.max(0, (customer.wallet || 0) - oldAmount);
+            customer.totalPaid = (customer.totalPaid || 0) + oldAmount;
+          } else if (oldPayType === "debt") {
+            customer.debt = (customer.debt || 0) + oldAmount;
+          } else {
+            customer.totalPaid = (customer.totalPaid || 0) + oldAmount;
+          }
+          return { success: false, reason: "insufficient_wallet" };
+        }
+        customer.wallet = (customer.wallet || 0) - newAmount;
+        customer.totalPaid = (customer.totalPaid || 0) + newAmount;
+        return { success: true, payType: "wallet", payBreakdown: { wallet: newAmount, debt: 0, cash: 0, card: 0 } };
+      } else if (newPayType === "debt") {
+        customer.debt = (customer.debt || 0) + newAmount;
+        return { success: true, payType: "debt" };
+      } else {
+        customer.totalPaid = (customer.totalPaid || 0) + newAmount;
+        let payBreakdown = oldPayType === "wallet" ? { wallet: newAmount, debt: 0, cash: 0, card: 0 } : oldBreakdown;
+        return { success: true, payType: newPayType, payBreakdown };
+      }
+    });
+  }
+
+  // Atomic reverse + re-apply for split payments: reverses the old breakdown,
+  // then re-applies the same breakdown scaled to the new amount. If the wallet
+  // leg fails, rolls back and returns failure.
+  async function reverseAndReapplySplit(customerId, oldAmount, oldBreakdown, newAmount) {
+    return await DB.runAtomic("customers", customerId, (customer) => {
+      if (!customer) return { success: false, reason: "not_found" };
+
+      // 1. Reverse old breakdown
+      let w = oldBreakdown.wallet || 0, d = oldBreakdown.debt || 0, o = (oldBreakdown.cash || 0) + (oldBreakdown.card || 0);
+      if (w) { customer.wallet = (customer.wallet || 0) + w; customer.totalPaid = Math.max(0, (customer.totalPaid || 0) - w); }
+      if (d) { customer.debt = Math.max(0, (customer.debt || 0) - d); }
+      if (o) { customer.totalPaid = Math.max(0, (customer.totalPaid || 0) - o); }
+
+      // 2. Compute scaled breakdown
+      let nw = oldBreakdown.wallet || 0, nd = oldBreakdown.debt || 0, nc = oldBreakdown.cash || 0, ncd = oldBreakdown.card || 0;
+      let sum = nw + nd + nc + ncd;
+      if (sum > 0) {
+        let ratio = newAmount / sum;
+        nw = Math.round(nw * ratio); nd = Math.round(nd * ratio); nc = Math.round(nc * ratio); ncd = Math.round(ncd * ratio);
+        let newSum = nw + nd + nc + ncd;
+        nc += newAmount - newSum;
+      } else { nc = newAmount; }
+      if (nw > (customer.wallet || 0)) {
+        // Rollback: re-apply old
+        if (w) { customer.wallet = Math.max(0, (customer.wallet || 0) - w); customer.totalPaid = (customer.totalPaid || 0) + w; }
+        if (d) { customer.debt = (customer.debt || 0) + d; }
+        if (o) { customer.totalPaid = (customer.totalPaid || 0) + o; }
+        return { success: false, reason: "insufficient_wallet" };
+      }
+      if (nw) { customer.wallet = Math.max(0, (customer.wallet || 0) - nw); customer.totalPaid = (customer.totalPaid || 0) + nw; }
+      if (nd) { customer.debt = (customer.debt || 0) + nd; }
+      if (nc || ncd) { customer.totalPaid = (customer.totalPaid || 0) + nc + ncd; }
+      return { success: true, payType: "wallet", payBreakdown: { wallet: nw, debt: nd, cash: nc, card: ncd } };
+    });
+  }
+
   async function editTransaction(txType, txId) {
     let t = null;
     if (txType === "session") {
@@ -742,10 +834,8 @@ const Reports = (function () {
 
         if (isSplitPayment(oldPayType, oldBreakdown)) {
           if (newAmount !== oldAmount && customerId) {
-            await reversePayment(customerId, oldAmount, oldPayType, oldBreakdown);
-            let payResult = await Utils.applyPayment(customerId, newAmount, "wallet");
+            let payResult = await reverseAndReapplySplit(customerId, oldAmount, oldBreakdown, newAmount);
             if (!payResult.success) {
-              await applyBreakdownDirect(customerId, oldBreakdown);
               App.toast("پرداخت ناموفق بود");
               return;
             }
@@ -756,12 +846,8 @@ const Reports = (function () {
           // payBreakdown are left exactly as they were — no-op on the till.
           session.settleAmount = newAmount;
         } else if (customerId && (oldAmount !== newAmount || oldPayType !== newPayType)) {
-          await reversePayment(customerId, oldAmount, oldPayType, oldBreakdown);
-          let payResult = await Utils.applyPayment(customerId, newAmount, newPayType);
+          let payResult = await reverseAndReapply(customerId, oldAmount, oldPayType, oldBreakdown, newAmount, newPayType);
           if (!payResult.success) {
-            // Roll back to the original payment so the reversal above doesn't
-            // leave the customer's balance short with nothing recorded.
-            await Utils.applyPayment(customerId, oldAmount, oldPayType);
             App.toast(payResult.reason === "insufficient_wallet" ? "موجودی کیف‌پول کافی نیست" : "پرداخت ناموفق بود");
             return;
           }
@@ -796,10 +882,8 @@ const Reports = (function () {
 
         if (isSplitPayment(oldPayType, oldBreakdown)) {
           if (newAmount !== oldAmount && bp.customerId) {
-            await reversePayment(bp.customerId, oldAmount, oldPayType, oldBreakdown);
-            let payResult = await Utils.applyPayment(bp.customerId, newAmount, "wallet");
+            let payResult = await reverseAndReapplySplit(bp.customerId, oldAmount, oldBreakdown, newAmount);
             if (!payResult.success) {
-              await applyBreakdownDirect(bp.customerId, oldBreakdown);
               App.toast("پرداخت ناموفق بود");
               return;
             }
@@ -808,10 +892,8 @@ const Reports = (function () {
           }
           bp.amount = newAmount;
         } else if (bp.customerId && (oldAmount !== newAmount || oldPayType !== newPayType)) {
-          await reversePayment(bp.customerId, oldAmount, oldPayType, oldBreakdown);
-          let payResult = await Utils.applyPayment(bp.customerId, newAmount, newPayType);
+          let payResult = await reverseAndReapply(bp.customerId, oldAmount, oldPayType, oldBreakdown, newAmount, newPayType);
           if (!payResult.success) {
-            await Utils.applyPayment(bp.customerId, oldAmount, oldPayType);
             App.toast(payResult.reason === "insufficient_wallet" ? "موجودی کیف‌پول کافی نیست" : "پرداخت ناموفق بود");
             return;
           }
@@ -844,10 +926,8 @@ const Reports = (function () {
 
         if (isSplitPayment(oldPayType, oldBreakdown)) {
           if (newAmount !== oldAmount && order.customerId) {
-            await reversePayment(order.customerId, oldAmount, oldPayType, oldBreakdown);
-            let payResult = await Utils.applyPayment(order.customerId, newAmount, "wallet");
+            let payResult = await reverseAndReapplySplit(order.customerId, oldAmount, oldBreakdown, newAmount);
             if (!payResult.success) {
-              await applyBreakdownDirect(order.customerId, oldBreakdown);
               App.toast("پرداخت ناموفق بود");
               return;
             }
@@ -856,10 +936,8 @@ const Reports = (function () {
           }
           order.total = newAmount;
         } else if (order.customerId && (oldAmount !== newAmount || oldPayType !== newPayType)) {
-          await reversePayment(order.customerId, oldAmount, oldPayType, oldBreakdown);
-          let payResult = await Utils.applyPayment(order.customerId, newAmount, newPayType);
+          let payResult = await reverseAndReapply(order.customerId, oldAmount, oldPayType, oldBreakdown, newAmount, newPayType);
           if (!payResult.success) {
-            await Utils.applyPayment(order.customerId, oldAmount, oldPayType);
             App.toast(payResult.reason === "insufficient_wallet" ? "موجودی کیف‌پول کافی نیست" : "پرداخت ناموفق بود");
             return;
           }
@@ -1075,6 +1153,7 @@ const Reports = (function () {
   async function exportMonthlyExcel() {
     let month = parseInt(document.getElementById("monthlyMonth")?.value);
     let year = parseInt(document.getElementById("monthlyYear")?.value);
+    if (!month || !year || isNaN(month) || isNaN(year)) { App.toast("ماه و سال را انتخاب کنید"); return; }
     let firstDay = Jalali.getJalaliFirstDayOfMonth(year, month);
     let monthDays = Jalali.getJalaliMonthDays(year, month);
 

@@ -64,7 +64,7 @@ const Utils = (function () {
     let total = 0;
     blocks.forEach((b) => {
       if (b.endTime && b.startTime) {
-        let minutes = (new Date(b.endTime) - new Date(b.startTime)) / 60000;
+        let minutes = Math.max(0, (new Date(b.endTime) - new Date(b.startTime)) / 60000);
         let hours = minutes / 60;
         total += hours * rate;
       }
@@ -76,9 +76,11 @@ const Utils = (function () {
     let totalMs = 0;
     blocks.forEach((b) => {
       if (b.endTime && b.startTime) {
-        totalMs += new Date(b.endTime) - new Date(b.startTime);
+        let diff = new Date(b.endTime) - new Date(b.startTime);
+        if (diff > 0) totalMs += diff;
       } else if (b.startTime && !b.endTime) {
-        totalMs += Date.now() - new Date(b.startTime).getTime();
+        let diff = Date.now() - new Date(b.startTime).getTime();
+        if (diff > 0) totalMs += diff;
       }
     });
     return totalMs;
@@ -286,24 +288,7 @@ const Utils = (function () {
   async function getEffectiveDiscount(customer) {
     if (!customer) return 0;
     let manualDiscount = customer.discount || 0;
-    let clubSettings = await DB.getSetting("customerClub", { categories: [], tierDiscounts: {} });
-    let categories = clubSettings.categories || [];
-    let tierDiscounts = clubSettings.tierDiscounts || {};
-    let totalPaid = customer.totalPaid || 0;
-    let bestRank = null;
-    for (let cat of categories) {
-      for (let t = 0; t < (cat.tiers || 0); t++) {
-        let threshold = (cat.baseThreshold || 0) + t * (cat.thresholdStep || 0);
-        if (totalPaid >= threshold) {
-          bestRank = { category: cat.name, tier: t + 1 };
-        }
-      }
-    }
-    let rankDiscount = 0;
-    if (bestRank) {
-      let key = bestRank.category + "_" + bestRank.tier;
-      rankDiscount = tierDiscounts[key] || 0;
-    }
+    let rankDiscount = await CustomerClub.getRankDiscountForCustomer(customer);
     return Math.max(manualDiscount, rankDiscount);
   }
 

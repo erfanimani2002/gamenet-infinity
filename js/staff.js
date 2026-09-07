@@ -188,9 +188,10 @@ const Staff = (function () {
     let staff = await DB.get("staff", staffId);
     let item = await DB.get("cafeItems", itemId);
     if (!item) return;
+    if (!item.unlimited && item.stock <= 0) { App.toast("موجودی آیتم تمام شده است"); return; }
     if (!staff.consumption) staff.consumption = [];
     staff.consumption.push({ itemId, name: item.name, price: item.price, qty: 1, date: new Date().toISOString() });
-    if (!item.unlimited && item.stock > 0) { item.stock--; await DB.put("cafeItems", item); } else if (!item.unlimited && item.stock <= 0) { App.toast("موجودی آیتم تمام شده است"); return; }
+    if (!item.unlimited) { item.stock--; await DB.put("cafeItems", item); }
     await DB.put("staff", staff);
     await DB.logActivity("مصرف پرسنل", staff.name + " - " + item.name + " | " + Utils.formatCurrency(item.price));
     App.toast("مصرف ثبت شد");
