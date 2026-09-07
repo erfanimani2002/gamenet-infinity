@@ -8,7 +8,7 @@ const Auth = (function () {
     );
     if (user) {
       currentUser = { id: user.id, username: user.username, role: user.role, name: user.name };
-      localStorage.setItem("gnet_user", JSON.stringify(currentUser));
+      sessionStorage.setItem("gnet_user", JSON.stringify(currentUser));
       await DB.logActivity("لاگین", "ورود کاربر: " + user.username, currentUser.id);
       return currentUser;
     } else {
@@ -21,12 +21,12 @@ const Auth = (function () {
       await DB.logActivity("لاگ‌اوت", "خروج کاربر: " + currentUser.username, currentUser.id);
     }
     currentUser = null;
-    localStorage.removeItem("gnet_user");
+    sessionStorage.removeItem("gnet_user");
   }
 
   function getSession() {
     if (currentUser) return currentUser;
-    let saved = localStorage.getItem("gnet_user");
+    let saved = sessionStorage.getItem("gnet_user");
     if (saved) {
       currentUser = JSON.parse(saved);
       return currentUser;
