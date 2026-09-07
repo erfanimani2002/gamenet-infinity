@@ -131,16 +131,16 @@ const AdminPanel = (function () {
   async function savePricing() {
     let pricing = {
       consoleRates: {
-        1: parseInt(document.getElementById("rate1").value) ?? 5000,
-        2: parseInt(document.getElementById("rate2").value) ?? 7000,
-        3: parseInt(document.getElementById("rate3").value) ?? 9000,
-        4: parseInt(document.getElementById("rate4").value) ?? 11000,
+        1: parseInt(document.getElementById("rate1").value) || 5000,
+        2: parseInt(document.getElementById("rate2").value) || 7000,
+        3: parseInt(document.getElementById("rate3").value) || 9000,
+        4: parseInt(document.getElementById("rate4").value) || 11000,
       },
       billiardRates: {
-        2: parseInt(document.getElementById("billiard2").value) ?? 8000,
-        4: parseInt(document.getElementById("billiard4").value) ?? 12000,
+        2: parseInt(document.getElementById("billiard2").value) || 8000,
+        4: parseInt(document.getElementById("billiard4").value) || 12000,
       },
-      roundingUnit: parseInt(document.getElementById("roundingUnit").value) ?? 1000,
+      roundingUnit: parseInt(document.getElementById("roundingUnit").value) || 1000,
     };
     await DB.setSetting("pricing", pricing);
     await DB.logActivity("ذخیره قیمت‌ها", "نرخ‌ها به‌روزرسانی شد");
@@ -298,8 +298,8 @@ const AdminPanel = (function () {
       return {
         name: nameEl ? nameEl.value.trim() || cat.name : cat.name,
         color: colorEl ? colorEl.value : cat.color,
-        slots: parseInt(slotsEl ? slotsEl.value : cat.slots) ?? 0,
-        discount: parseInt(discountEl ? discountEl.value : cat.discount) ?? 0,
+        slots: parseInt(slotsEl ? slotsEl.value : cat.slots) || 0,
+        discount: parseInt(discountEl ? discountEl.value : cat.discount) || 0,
       };
     });
 

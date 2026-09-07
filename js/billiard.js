@@ -279,16 +279,19 @@ const Billiard = (function () {
     let sessions = await DB.getAll("sessions");
     let session = sessions.find((s) => s.deviceId === deviceId && s.status === "active");
     if (!session) return;
+    // Preview-only projection of the currently-open block's price. This must NOT
+    // mutate session.timeBlocks or persist via DB.put — this modal can be cancelled,
+    // and the real close-and-persist happens in confirmSettleSession on confirmation.
     let lastBlock = session.timeBlocks[session.timeBlocks.length - 1];
+    let projectedOpenBlockPrice = null;
     if (lastBlock && !lastBlock.endTime) {
-      lastBlock.endTime = new Date().toISOString();
-      let hours = (new Date(lastBlock.endTime) - new Date(lastBlock.startTime)) / 3600000;
+      let projectedEndTime = new Date().toISOString();
+      let hours = (new Date(projectedEndTime) - new Date(lastBlock.startTime)) / 3600000;
       let pricing = await DB.getSetting("pricing", {});
-      lastBlock.price = Utils.roundPrice(hours * lastBlock.rate, pricing.roundingUnit || 1000);
-      await DB.put("sessions", session);
+      projectedOpenBlockPrice = Utils.roundPrice(hours * lastBlock.rate, pricing.roundingUnit || 1000);
     }
 
-    let totalBlocks = session.timeBlocks.filter((b) => !b.settled).reduce((s, b) => s + (b.price || 0), 0);
+    let totalBlocks = session.timeBlocks.filter((b) => !b.settled).reduce((s, b) => s + (b === lastBlock ? (projectedOpenBlockPrice || 0) : (b.price || 0)), 0);
     let totalItems = (session.items || []).reduce((s, i) => s + (i.price * i.qty), 0);
     let total = totalBlocks + totalItems;
     let discount = 0;
