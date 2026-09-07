@@ -40,7 +40,7 @@ const Billiard = (function () {
       let stickText = session.controllerCount === 4 ? "چهارچوب" : "دوچوب";
 
       return `
-        <div class="device-item" style="background: #fff7ed;">
+        <div class="device-item is-busy">
           <img class="device-thumb" src="img/pool.webp" alt="بیلیارد">
           <span class="device-name">${Utils.escapeHtml(device.name)}</span>
           <span class="device-status">
@@ -417,9 +417,9 @@ const Billiard = (function () {
     App.openModal(`
       <h2>افزودن آیتم</h2>
       <h3>کافی‌شاپ</h3>
-      <div class="item-grid">${cafeItems.map((item) => `<div class="item-card" onclick="Billiard.addItemClick(${deviceId}, ${item.id}, 'cafe')"><div class="item-name">${Utils.escapeHtml(item.name)}</div><div class="item-price">${Utils.formatCurrency(item.price)}</div></div>`).join("")}</div>
+      <div class="pick-list">${cafeItems.map((item) => `<div class="pick-item" onclick="Billiard.addItemClick(${deviceId}, ${item.id}, 'cafe')"><span class="pick-name">${Utils.escapeHtml(item.name)}</span><span class="pick-meta">${Utils.formatCurrency(item.price)}</span></div>`).join("")}</div>
       <h3 style="margin-top:12px">جریمه/تخفیف</h3>
-      <div class="item-grid">${penalties.map((item) => `<div class="item-card ${item.type === 'penalty' ? 'penalty-item' : 'discount-item'}" onclick="Billiard.addItemClick(${deviceId}, ${item.id}, 'penalty')"><div class="item-name">${Utils.escapeHtml(item.name)}</div></div>`).join("")}</div>
+      <div class="pick-list">${penalties.map((item) => `<div class="pick-item" onclick="Billiard.addItemClick(${deviceId}, ${item.id}, 'penalty')"><span class="pick-name">${Utils.escapeHtml(item.name)}</span></div>`).join("")}</div>
       <div class="modal-actions"><button class="btn btn-outline" onclick="App.closeModalForce()">بستن</button></div>
     `);
   }

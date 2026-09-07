@@ -5,44 +5,44 @@ const App = (function () {
   const SIDEBAR = [
     {
       id: "devices", label: "دستگاه‌ها", items: [
-        { tab: "consoles", icon: "🎮", label: "کنسول‌ها" },
-        { tab: "billiard", icon: "🎱", label: "بیلیارد" },
-        { tab: "pcs", icon: "💻", label: "پی‌سی" },
+        { tab: "consoles", icon: "consoles", label: "کنسول‌ها" },
+        { tab: "billiard", icon: "billiard", label: "بیلیارد" },
+        { tab: "pcs", icon: "pcs", label: "پی‌سی" },
       ],
     },
     {
       id: "sales", label: "فروش و خدمات", items: [
-        { tab: "cafe", icon: "☕", label: "کافی‌شاپ" },
-        { tab: "games", icon: "🎯", label: "بازی‌ها" },
+        { tab: "cafe", icon: "cafe", label: "کافی‌شاپ" },
+        { tab: "games", icon: "games", label: "بازی‌ها" },
       ],
     },
     {
       id: "customers", label: "مشتریان", items: [
-        { tab: "customers", icon: "👤", label: "شناسه‌ها" },
-        { tab: "customerClub", icon: "🏅", label: "باشگاه مشتریان" },
-        { tab: "debts", icon: "💰", label: "بدهی‌ها" },
+        { tab: "customers", icon: "customers", label: "شناسه‌ها" },
+        { tab: "customerClub", icon: "customerClub", label: "باشگاه مشتریان" },
+        { tab: "debts", icon: "debts", label: "بدهی‌ها" },
       ],
     },
     {
       id: "reports", label: "گزارش‌ها", items: [
-        { tab: "reports", icon: "📊", label: "گزارش روزانه" },
-        { tab: "instantReport", icon: "⚡", label: "گزارش لحظه‌ای" },
-        { tab: "monthlyReport", icon: "📅", label: "گزارش ماهانه" },
-        { tab: "activityLog", icon: "📋", label: "لاگ فعالیت" },
+        { tab: "reports", icon: "reports", label: "گزارش روزانه" },
+        { tab: "instantReport", icon: "instantReport", label: "گزارش لحظه‌ای" },
+        { tab: "monthlyReport", icon: "monthlyReport", label: "گزارش ماهانه" },
+        { tab: "activityLog", icon: "activityLog", label: "لاگ فعالیت" },
       ],
     },
     {
       id: "management", label: "مدیریت", items: [
-        { tab: "purchases", icon: "🛒", label: "خریدها" },
-        { tab: "inventory", icon: "📦", label: "موجودی" },
-        { tab: "staff", icon: "👥", label: "پرسنل" },
-        { tab: "backup", icon: "💾", label: "پشتیبان‌گیری" },
-        { tab: "adminPanel", icon: "⚙️", label: "پنل مدیریت" },
+        { tab: "purchases", icon: "purchases", label: "خریدها" },
+        { tab: "inventory", icon: "inventory", label: "موجودی" },
+        { tab: "staff", icon: "staff", label: "پرسنل" },
+        { tab: "backup", icon: "backup", label: "پشتیبان‌گیری" },
+        { tab: "adminPanel", icon: "adminPanel", label: "پنل مدیریت" },
       ],
     },
     {
       id: "tournaments", label: "مسابقات", items: [
-        { tab: "tournaments", icon: "🏆", label: "مسابقات" },
+        { tab: "tournaments", icon: "tournaments", label: "مسابقات" },
       ],
     },
   ];
@@ -87,8 +87,8 @@ const App = (function () {
         <div class="sidebar-group">
           <div class="sidebar-header">${group.label}</div>
           ${visibleItems.map((item) => `
-            <div class="sidebar-item" data-tab="${item.tab}" onclick="App.switchTab('${item.tab}')">
-              <span class="item-icon">${item.icon}</span>
+            <div class="sidebar-item" data-tab="${item.tab}" onclick="App.switchTab('${item.tab}')" title="${item.label}">
+              <span class="item-icon">${(typeof Icons !== "undefined" ? Icons.get(item.icon, 18) : item.icon)}</span>
               <span>${item.label}</span>
             </div>
           `).join("")}
@@ -328,7 +328,7 @@ const App = (function () {
     }
     let icon = document.getElementById("themeIcon");
     let label = document.getElementById("themeLabel");
-    if (icon) icon.textContent = theme === "dark" ? "🌙" : "☀️";
+    if (icon) icon.innerHTML = (typeof Icons !== "undefined" ? Icons.get(theme === "dark" ? "moon" : "sun", 16) : (theme === "dark" ? "🌙" : "☀️"));
     if (label) label.textContent = theme === "dark" ? "حالت روشن" : "حالت تاریک";
   }
 

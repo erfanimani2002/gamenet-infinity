@@ -1,8 +1,8 @@
 const Tournaments = (function () {
   const GAME_TYPES = {
-    football: { label: "فوتبال", icon: "⚽", teamSize: 1 },
-    billiard: { label: "بیلیارد", icon: "🎱", teamSize: 1 },
-    cs2: { label: "CS2", icon: "🎯", teamSize: 5 },
+    football: { label: "فوتبال", icon: "consoles", teamSize: 1 },
+    billiard: { label: "بیلیارد", icon: "billiard", teamSize: 1 },
+    cs2: { label: "CS2", icon: "games", teamSize: 5 },
   };
 
   const STATUS = {
@@ -22,7 +22,7 @@ const Tournaments = (function () {
           <h2>مسابقات</h2>
           <button class="btn btn-primary" onclick="Tournaments.showCreateTournament()">+ مسابقه جدید</button>
         </div>
-        ${tournaments.length === 0 ? '<div class="empty-state"><div class="empty-icon">🏆</div>هنوز مسابقه‌ای ثبت نشده</div>' : ''}
+        ${tournaments.length === 0 ? '<div class="empty-state"><div class="empty-icon">' + (typeof Icons !== "undefined" ? Icons.get("tournaments", 40) : "") + '</div>هنوز مسابقه‌ای ثبت نشده</div>' : ''}
         ${tournaments.map((t) => renderTournamentCard(t)).join("")}
       </div>
     `;
@@ -64,7 +64,7 @@ const Tournaments = (function () {
     return `
       <div class="list-row" style="flex-direction:column;align-items:stretch;gap:8px;padding:14px;">
         <div style="display:flex;align-items:center;gap:10px;">
-          <span style="font-size:20px;">${info.icon}</span>
+          <span class="item-icon">${(typeof Icons !== "undefined" ? Icons.get(info.icon, 20) : "")}</span>
           <span class="font-bold" style="font-size:15px;">${Utils.escapeHtml(t.name)}</span>
           <span class="status-badge" style="background:${st.color}20;color:${st.color};margin-right:auto;">${st.label}</span>
         </div>
@@ -90,9 +90,9 @@ const Tournaments = (function () {
       <div class="form-group"><label>نام مسابقه</label><input type="text" id="tName" value="${Utils.escapeHtml(t.name)}"></div>
       <div class="form-group"><label>نوع بازی</label>
         <select id="tGameType" onchange="Tournaments.onGameTypeChange()">
-          <option value="football" ${t.gameType === 'football' ? 'selected' : ''}>⚽ فوتبال (کنسول)</option>
-          <option value="billiard" ${t.gameType === 'billiard' ? 'selected' : ''}>🎱 بیلیارد</option>
-          <option value="cs2" ${t.gameType === 'cs2' ? 'selected' : ''}>🎯 CS2 (پی‌سی)</option>
+          <option value="football" ${t.gameType === 'football' ? 'selected' : ''}>فوتبال (کنسول)</option>
+          <option value="billiard" ${t.gameType === 'billiard' ? 'selected' : ''}>بیلیارد</option>
+          <option value="cs2" ${t.gameType === 'cs2' ? 'selected' : ''}>CS2 (پی‌سی)</option>
         </select>
       </div>
       <div class="form-group"><label>نوع براکت</label>
@@ -315,7 +315,7 @@ const Tournaments = (function () {
     let standingsHtml = t.bracketType === "league" ? renderLeagueStandings(matches, customers, participants) : "";
 
     App.openModal(`
-      <h2>${gameInfo.icon} ${Utils.escapeHtml(t.name)}</h2>
+      <h2>${Utils.escapeHtml(t.name)}</h2>
         <div style="display:flex;gap:12px;flex-wrap:wrap;font-size:13px;margin-bottom:12px;">
           <span class="status-badge" style="background:${st.color}20;color:${st.color};">${st.label}</span>
           <span>${gameInfo.label}</span>
@@ -487,7 +487,7 @@ const Tournaments = (function () {
 
   function getRoundLabel(round, totalRounds) {
     if (totalRounds === 1) return "فینال";
-    if (round === totalRounds) return "🏆 فینال";
+    if (round === totalRounds) return "فینال";
     if (round === totalRounds - 1) return "نیمه‌نهایی";
     if (round === totalRounds - 2 && totalRounds >= 3) return "ربع‌نهایی";
     return `دور ${round}`;
@@ -1411,7 +1411,7 @@ const Tournaments = (function () {
 
     return `
       <div class="accounting-section" style="margin-top:16px;">
-        <h3 style="margin-bottom:8px;">💰 حسابداری</h3>
+        <h3 style="margin-bottom:8px;">حسابداری</h3>
 
         <div style="margin-bottom:16px;">
           <h4 style="margin-bottom:6px;font-size:13px;">حق ورود (${Utils.formatCurrency(entryFee)} × ${participants.length} نفر)</h4>

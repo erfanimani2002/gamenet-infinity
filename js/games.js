@@ -45,11 +45,11 @@ const Games = (function () {
       <div class="report-section">
         <h3>کنسول‌ها</h3>
         ${consoleGames.length === 0 ? '<div class="text-muted text-sm">بدون بازی</div>' : ''}
-        <div class="item-grid">
+        <div class="games-list">
           ${consoleGames.map((g) => `
-            <div class="item-card" onclick="Games.showConnectDevices(${g.id})" style="cursor:pointer">
-              <div class="item-name">${Utils.escapeHtml(g.name)}</div>
-              <div class="item-price text-sm text-muted">${deviceNames(g.id) || 'بدون دستگاه'}</div>
+            <div class="games-list-row" onclick="Games.showConnectDevices(${g.id})" style="cursor:pointer">
+              <span class="row-value" style="flex:1;font-weight:600">${Utils.escapeHtml(g.name)}</span>
+              <span class="text-sm text-muted">${deviceNames(g.id) || 'بدون دستگاه'}</span>
               <button class="btn btn-sm btn-danger" onclick="event.stopPropagation(); Games.deleteGame(${g.id})">حذف</button>
             </div>
           `).join("")}
@@ -59,11 +59,11 @@ const Games = (function () {
       <div class="report-section">
         <h3>پی‌سی‌ها</h3>
         ${pcGames.length === 0 ? '<div class="text-muted text-sm">بدون بازی</div>' : ''}
-        <div class="item-grid">
+        <div class="games-list">
           ${pcGames.map((g) => `
-            <div class="item-card" onclick="Games.showConnectDevices(${g.id})" style="cursor:pointer">
-              <div class="item-name">${Utils.escapeHtml(g.name)}</div>
-              <div class="item-price text-sm text-muted">${deviceNames(g.id) || 'بدون دستگاه'}</div>
+            <div class="games-list-row" onclick="Games.showConnectDevices(${g.id})" style="cursor:pointer">
+              <span class="row-value" style="flex:1;font-weight:600">${Utils.escapeHtml(g.name)}</span>
+              <span class="text-sm text-muted">${deviceNames(g.id) || 'بدون دستگاه'}</span>
               <button class="btn btn-sm btn-danger" onclick="event.stopPropagation(); Games.deleteGame(${g.id})">حذف</button>
             </div>
           `).join("")}

@@ -45,7 +45,7 @@ const Consoles = (function () {
       let idsHtml = (session.ids || []).map((id) => { let c = customers.find((cu) => cu.id === id); return "#" + (c ? (c.displayId || c.id) : id); }).join(", ") || "?";
 
       return `
-        <div class="device-item" style="background: #fff7ed;">
+        <div class="device-item is-busy">
           <img class="device-thumb" src="img/ps5-on.webp" alt="کنسول">
           <span class="device-name">${Utils.escapeHtml(device.name)}</span>
           <span class="device-status">
@@ -535,12 +535,12 @@ const Consoles = (function () {
     App.openModal(`
       <h2>افزودن آیتم به سشن</h2>
       <h3>آیتم‌های کافی‌شاپ</h3>
-      <div class="item-grid">
-        ${cafeItems.map((item) => `<div class="item-card" onclick="Consoles.addItemClick(${deviceId}, ${item.id}, 'cafe')"><div class="item-name">${Utils.escapeHtml(item.name)}</div><div class="item-price">${Utils.formatCurrency(item.price)}</div></div>`).join("")}
+      <div class="pick-list">
+        ${cafeItems.map((item) => `<div class="pick-item" onclick="Consoles.addItemClick(${deviceId}, ${item.id}, 'cafe')"><span class="pick-name">${Utils.escapeHtml(item.name)}</span><span class="pick-meta">${Utils.formatCurrency(item.price)}</span></div>`).join("")}
       </div>
       <h3 style="margin-top:12px">جریمه/تخفیف</h3>
-      <div class="item-grid">
-        ${penalties.map((item) => `<div class="item-card ${item.type === 'penalty' ? 'penalty-item' : 'discount-item'}" onclick="Consoles.addItemClick(${deviceId}, ${item.id}, 'penalty')"><div class="item-name">${Utils.escapeHtml(item.name)}</div><div class="item-price">${item.type === 'penalty' ? '+' : '-'}${Utils.formatCurrency(item.amount)}</div></div>`).join("")}
+      <div class="pick-list">
+        ${penalties.map((item) => `<div class="pick-item" onclick="Consoles.addItemClick(${deviceId}, ${item.id}, 'penalty')"><span class="pick-name">${Utils.escapeHtml(item.name)}</span><span class="pick-meta">${item.type === 'penalty' ? '+' : '-'}${Utils.formatCurrency(item.amount)}</span></div>`).join("")}
       </div>
       <div class="modal-actions"><button class="btn btn-outline" onclick="App.closeModalForce()">بستن</button></div>
     `);

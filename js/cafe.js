@@ -14,7 +14,7 @@ const Cafe = (function () {
         <div class="item-grid">
           ${items.map((item) => `
             <div class="item-card" onclick="Cafe.addToCart(${item.id})">
-              ${item.image ? `<img class="item-img" src="${item.image}" alt="${Utils.escapeHtml(item.name)}">` : `<div class="item-img item-img-placeholder">☕</div>`}
+              ${item.image ? `<img class="item-img" src="${item.image}" alt="${Utils.escapeHtml(item.name)}">` : `<div class="item-img item-img-placeholder">${(typeof Icons !== "undefined" ? Icons.get("cafe", 24) : "")}</div>`}
               <div class="item-name">${Utils.escapeHtml(item.name)}</div>
               <div class="item-price">${Utils.formatCurrency(item.price)}</div>
               <div class="item-stock">${item.unlimited ? 'موجودی: نامحدود' : 'موجودی: ' + item.stock}</div>

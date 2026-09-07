@@ -6,7 +6,7 @@ const Debts = (function () {
     let html = `
       <div class="card">
         <div class="card-header"><h2>بدهی‌ها</h2></div>
-        ${debtors.length === 0 ? '<div class="empty-state"><div class="empty-icon">✅</div>هیچ بدهی‌ای وجود ندارد</div>' : ''}
+        ${debtors.length === 0 ? '<div class="empty-state"><div class="empty-icon">' + (typeof Icons !== "undefined" ? Icons.get("debts", 40) : "") + '</div>هیچ بدهی‌ای وجود ندارد</div>' : ''}
         ${debtors.map((c) => `
           <div class="debt-row">
             <span class="row-label">#${c.displayId || c.id}</span>

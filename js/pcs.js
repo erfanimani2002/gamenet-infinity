@@ -25,7 +25,7 @@ const PCs = (function () {
     if (session) {
       let idsHtml = (session.ids || []).map((id) => { let c = customers.find((cu) => cu.id === id); return "#" + (c ? (c.displayId || c.id) : id); }).join(", ") || "?";
       return `
-        <div class="device-item" style="background: #fff7ed;">
+        <div class="device-item is-busy">
           <img class="device-thumb" src="img/pc-on.webp" alt="پی‌سی">
           <span class="device-name">${Utils.escapeHtml(device.name)}</span>
           <span class="device-status">
@@ -264,8 +264,8 @@ const PCs = (function () {
     let cafeItems = await DB.getAll("cafeItems");
     App.openModal(`
       <h2>افزودن آیتم</h2>
-      <div class="item-grid">
-        ${cafeItems.map((item) => `<div class="item-card" onclick="PCs.addItemClick(${deviceId}, ${item.id})"><div class="item-name">${Utils.escapeHtml(item.name)}</div><div class="item-price">${Utils.formatCurrency(item.price)}</div></div>`).join("")}
+      <div class="pick-list">
+        ${cafeItems.map((item) => `<div class="pick-item" onclick="PCs.addItemClick(${deviceId}, ${item.id})"><span class="pick-name">${Utils.escapeHtml(item.name)}</span><span class="pick-meta">${Utils.formatCurrency(item.price)}</span></div>`).join("")}
       </div>
       <div class="modal-actions"><button class="btn btn-outline" onclick="App.closeModalForce()">بستن</button></div>
     `);

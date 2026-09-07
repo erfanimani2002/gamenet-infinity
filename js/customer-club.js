@@ -6,7 +6,7 @@ const CustomerClub = (function () {
   let currentSearch = "";
 
   const interestLabels = { billiard: "بیلیارد", console: "کنسول", cs: "سی‌اس" };
-  const interestIcons = { billiard: "🎱", console: "🎮", cs: "🔫" };
+  const interestIcons = { billiard: "", console: "", cs: "" };
 
   function computeRank(totalPaid, categories) {
     let best = null;

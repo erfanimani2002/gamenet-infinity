@@ -106,8 +106,8 @@ const Staff = (function () {
           }
         </div>
         <h3>افزودن مصرف</h3>
-        <div class="item-grid">
-          ${cafeItems.map((item) => `<div class="item-card" onclick="Staff.addConsumptionAndRefreshTab(${staffId}, ${item.id})"><div class="item-name">${Utils.escapeHtml(item.name)}</div><div class="item-price">${Utils.formatCurrency(item.price)}</div></div>`).join("")}
+        <div class="pick-list">
+          ${cafeItems.map((item) => `<div class="pick-item" onclick="Staff.addConsumptionAndRefreshTab(${staffId}, ${item.id})"><span class="pick-name">${Utils.escapeHtml(item.name)}</span><span class="pick-meta">${Utils.formatCurrency(item.price)}</span></div>`).join("")}
         </div>
         <h3 style="margin-top:12px">آخرین مصرف‌ها</h3>
         ${(staff.consumption || []).slice(-5).reverse().map((c) => `<div class="block-item"><span>${Utils.escapeHtml(c.name)} x${c.qty} - ${Utils.formatCurrency(c.price * c.qty)}</span><span class="text-muted text-sm">${Jalali.formatDateTime(c.date)}</span></div>`).join("") || '<div class="text-muted text-sm">بدون مصرف</div>'}

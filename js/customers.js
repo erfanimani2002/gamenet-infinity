@@ -20,7 +20,7 @@ const Customers = (function () {
 
   function renderCustomerList(customers) {
     if (customers.length === 0) {
-      return '<div class="empty-state"><div class="empty-icon">👤</div>هنوز شناسه‌ای ثبت نشده</div>';
+      return '<div class="empty-state"><div class="empty-icon">' + (typeof Icons !== "undefined" ? Icons.get("customers", 40) : "") + '</div>هنوز شناسه‌ای ثبت نشده</div>';
     }
     return customers.map((c) => `
       <div class="list-row" data-search="${String(c.displayId || c.id).toLowerCase()}">
