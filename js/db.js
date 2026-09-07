@@ -1,6 +1,6 @@
 const DB = (function () {
   const DB_NAME = "GameNetInfinity";
-  const DB_VERSION = 5;
+  const DB_VERSION = 6;
   let db = null;
 
   const STORES = {
@@ -25,6 +25,8 @@ const DB = (function () {
     tournamentParticipants: { keyPath: "id", autoIncrement: true },
     blockPayments: { keyPath: "id", autoIncrement: true },
     prizePayouts: { keyPath: "id", autoIncrement: true },
+    overnightReservations: { keyPath: "id", autoIncrement: true },
+    overnightTransactions: { keyPath: "id", autoIncrement: true },
   };
 
   const INDEXES = {
@@ -43,6 +45,15 @@ const DB = (function () {
     tournamentParticipants: [{ name: "by_tournament", keyPath: "tournamentId" }],
     blockPayments: [{ name: "by_session", keyPath: "sessionId" }],
     prizePayouts: [{ name: "by_tournament", keyPath: "tournamentId" }],
+    overnightReservations: [
+      { name: "by_status", keyPath: "status" },
+      { name: "by_customer", keyPath: "customerId" },
+      { name: "by_created", keyPath: "createdAt" },
+    ],
+    overnightTransactions: [
+      { name: "by_reservation", keyPath: "reservationId" },
+      { name: "by_timestamp", keyPath: "timestamp" },
+    ],
   };
 
   function open() {
@@ -237,7 +248,12 @@ const DB = (function () {
         billiardRates: { 2: 8000, 4: 12000 },
         pcRate: 3000,
         roundingUnit: 1000,
+        overnightEntranceFee: 100000,
       });
+    } else if (pricing.overnightEntranceFee == null) {
+      // Upgrade path for installs created before the overnight feature existed.
+      pricing.overnightEntranceFee = 100000;
+      await setSetting("pricing", pricing);
     }
     let customerClub = await getSetting("customerClub");
     if (!customerClub) {

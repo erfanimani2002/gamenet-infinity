@@ -47,6 +47,13 @@ const AdminPanel = (function () {
               <input type="number" id="roundingUnit" value="${pricing.roundingUnit || 1000}" min="100">
             </div>
           </div>
+          <div class="form-inline">
+            <div class="form-group">
+              <label>ورودی رزرو شب (تومان)</label>
+              <input type="number" id="overnightEntranceFee" value="${pricing.overnightEntranceFee != null ? pricing.overnightEntranceFee : 100000}" min="0">
+            </div>
+          </div>
+          <div class="text-muted text-sm mb-2">تغییر این مبلغ فقط روی رزروهای جدید اثر می‌گذارد و مبلغ ورودی رزروهای قبلی ثابت می‌ماند.</div>
           <button class="btn btn-primary mt-2" onclick="AdminPanel.savePricing()">ذخیره قیمت‌ها</button>
         </div>
 
@@ -141,6 +148,7 @@ const AdminPanel = (function () {
         4: parseInt(document.getElementById("billiard4").value) || 12000,
       },
       roundingUnit: parseInt(document.getElementById("roundingUnit").value) || 1000,
+      overnightEntranceFee: parseInt(document.getElementById("overnightEntranceFee").value) || 0,
     };
     await DB.setSetting("pricing", pricing);
     await DB.logActivity("ذخیره قیمت‌ها", "نرخ‌ها به‌روزرسانی شد");

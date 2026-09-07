@@ -13,6 +13,7 @@ const Reports = (function () {
     let tournaments = (preloaded && preloaded.tournaments) || await DB.getAll("tournaments");
     let matchData = (preloaded && preloaded.matches) || await DB.getAll("matches");
     let payouts = (preloaded && preloaded.prizePayouts) || await DB.getAll("prizePayouts");
+    let overnightTx = (preloaded && preloaded.overnightTransactions) || await DB.getAll("overnightTransactions");
 
     let settledSessions = sessions.filter((s) => s.status === "settled" && s.settledAt && Utils.isInRange(s.settledAt, range.start, range.end));
     let dailyOrders = cafeOrders.filter((o) => Utils.isInRange(o.createdAt, range.start, range.end));
@@ -133,11 +134,37 @@ const Reports = (function () {
       else if (p.payType === "card") payoutCard += p.amount || 0;
     });
 
+    // Overnight reservations: entrance fee, food/items, and other charges are
+    // kept distinguishable (spec requirement), each with its own cash/card/
+    // wallet/debt legs. A payment's categoryBreakdown (computed at payment
+    // time by Overnight.recordPayment) already tells us exactly how much of
+    // it applies to each category, so we split the payment's exact legs
+    // (payBreakdown) by that same proportion — no re-derivation needed.
+    // Refunds subtract (their legs are negated), matching how a refund
+    // reduces recognized revenue; writeoffs never appear here at all since no
+    // money moved for them.
+    let overnightEntrance = { cash: 0, card: 0, wallet: 0, debt: 0 };
+    let overnightItems = { cash: 0, card: 0, wallet: 0, debt: 0 };
+    let overnightOther = { cash: 0, card: 0, wallet: 0, debt: 0 };
+    let dailyOvernightTx = overnightTx.filter((t) => Utils.isInRange(t.timestamp, range.start, range.end) && t.status !== "voided" && (t.type === "payment" || t.type === "refund"));
+    dailyOvernightTx.forEach((t) => {
+      let sign = t.type === "refund" ? -1 : 1;
+      let overallLegs = legsOf(t.amount, t.payType, t.payBreakdown);
+      let split = Utils.splitLegsByCategory(overallLegs, t.categoryBreakdown, ["entrance", "items", "other"]);
+      ["entrance", "items", "other"].forEach((cat) => {
+        let target = cat === "entrance" ? overnightEntrance : cat === "items" ? overnightItems : overnightOther;
+        target.cash += sign * split[cat].cash;
+        target.card += sign * split[cat].card;
+        target.wallet += sign * split[cat].wallet;
+        target.debt += sign * split[cat].debt;
+      });
+    });
+
     // Till reconciliation totals — unchanged: only cash/card legs count here.
     // Wallet/debt legs (computed above per area) are reporting-only and never
     // enter these sums, since no physical money moved through the till for them.
-    let totalCashIn = consoleCalc.cash + consoleBlock.cash + billiardCalc.cash + billiardBlock.cash + pcCalc.cash + cafeCash + debtCash + chargeCash + tournamentCash;
-    let totalCardIn = consoleCalc.card + consoleBlock.card + billiardCalc.card + billiardBlock.card + pcCalc.card + cafeCard + debtCard + chargeCard + tournamentCard;
+    let totalCashIn = consoleCalc.cash + consoleBlock.cash + billiardCalc.cash + billiardBlock.cash + pcCalc.cash + cafeCash + debtCash + chargeCash + tournamentCash + overnightEntrance.cash + overnightItems.cash + overnightOther.cash;
+    let totalCardIn = consoleCalc.card + consoleBlock.card + billiardCalc.card + billiardBlock.card + pcCalc.card + cafeCard + debtCard + chargeCard + tournamentCard + overnightEntrance.card + overnightItems.card + overnightOther.card;
     let totalCashOut = purchaseCash + payoutCash;
     let totalCardOut = purchaseCard + payoutCard;
 
@@ -146,6 +173,7 @@ const Reports = (function () {
       cafeCash, cafeCard, cafeWallet, cafeDebt, debtCash, debtCard, chargeCash, chargeCard,
       purchaseCash, purchaseCard, purchaseOther, payoutCash, payoutCard,
       tournamentCash, tournamentCard, tournamentWallet, tournamentDebt, tournamentMatchBlock, activeMatches,
+      overnightEntrance, overnightItems, overnightOther,
       totalCashIn, totalCardIn, totalCashOut, totalCardOut,
     };
   }
@@ -178,6 +206,7 @@ const Reports = (function () {
       cafeCash, cafeCard, cafeWallet, cafeDebt, debtCash, debtCard, chargeCash, chargeCard,
       purchaseCash, purchaseCard, purchaseOther, payoutCash, payoutCard,
       tournamentCash, tournamentCard, tournamentWallet, tournamentDebt, activeMatches,
+      overnightEntrance, overnightItems, overnightOther,
       totalCashIn, totalCardIn, totalCashOut, totalCardOut,
     } = d;
 
@@ -192,6 +221,21 @@ const Reports = (function () {
       renderAreaBreakdown("کافی‌شاپ", cafeCash, cafeCard, cafeWallet, cafeDebt),
       renderAreaBreakdown("مسابقات", tournamentCash, tournamentCard, tournamentWallet, tournamentDebt, tournamentExtra),
     ].join("");
+
+    let overnightTotal = overnightEntrance.cash + overnightEntrance.card + overnightEntrance.wallet + overnightEntrance.debt
+      + overnightItems.cash + overnightItems.card + overnightItems.wallet + overnightItems.debt
+      + overnightOther.cash + overnightOther.card + overnightOther.wallet + overnightOther.debt;
+    let overnightHtml = overnightTotal !== 0 ? `
+      <div class="report-section">
+        <h4>رزروهای شب</h4>
+        <div class="report-summary">
+          <div class="summary-item"><div class="summary-label">ورودی</div><div class="summary-value">${Utils.formatCurrency(overnightEntrance.cash + overnightEntrance.card + overnightEntrance.wallet + overnightEntrance.debt)}</div></div>
+          <div class="summary-item"><div class="summary-label">غذا و آیتم‌ها</div><div class="summary-value">${Utils.formatCurrency(overnightItems.cash + overnightItems.card + overnightItems.wallet + overnightItems.debt)}</div></div>
+          <div class="summary-item"><div class="summary-label">سایر</div><div class="summary-value">${Utils.formatCurrency(overnightOther.cash + overnightOther.card + overnightOther.wallet + overnightOther.debt)}</div></div>
+          <div class="summary-item"><div class="summary-label">جمع کل شب</div><div class="summary-value font-bold">${Utils.formatCurrency(overnightTotal)}</div></div>
+        </div>
+      </div>
+    ` : "";
 
     let html = `
       <div class="card">
@@ -234,6 +278,7 @@ const Reports = (function () {
         <hr class="section-divider">
         <h3>فروش / عملیات</h3>
         ${areasHtml || '<div class="text-muted text-sm">فروش/عملیاتی ثبت نشده</div>'}
+        ${overnightHtml}
 
         <hr class="section-divider">
         <h3>پرداختی‌ها (خریدها)</h3>
@@ -329,6 +374,7 @@ const Reports = (function () {
       tournaments: await DB.getAll("tournaments"),
       matches: await DB.getAll("matches"),
       prizePayouts: await DB.getAll("prizePayouts"),
+      overnightTransactions: await DB.getAll("overnightTransactions"),
     };
     let dailySummaries = await DB.getAll("dailySummaries");
 
@@ -601,11 +647,17 @@ const Reports = (function () {
       let c = customers.find((cu) => cu.id === bp.customerId);
       all.push({ txType: "blockPayment", txId: bp.id, type: bp.deviceType === "tournament" ? "تسویه بازی مسابقه" : "تسویه بلوک", device: device ? device.name : "-", amount: bp.amount || 0, payType: bp.payType, time: bp.date, ids: c ? "#" + (c.displayId || c.id) : "-" });
     });
+    let overnightTx = await DB.getAll("overnightTransactions");
+    overnightTx.filter((t) => (t.type === "payment" || t.type === "refund") && Utils.isInRange(t.timestamp, range.start, range.end) && t.status !== "voided").forEach((t) => {
+      let c = customers.find((cu) => cu.id === t.customerId);
+      let label = (t.type === "refund" ? "استرداد رزرو شب" : "پرداخت رزرو شب") + " #" + t.reservationId;
+      all.push({ txType: "overnight", txId: t.id, type: label, device: "-", amount: t.type === "refund" ? -t.amount : t.amount, payType: t.payType, time: t.timestamp, ids: c ? "#" + (c.displayId || c.id) : "-" });
+    });
 
     all.sort((a, b) => new Date(b.time) - new Date(a.time));
 
     App.openModal(`<h2>لیست تراکنش‌ها</h2><div style="max-height:400px;overflow-y:auto;">
-      ${all.map((t) => `<div class="list-row"><span class="row-label">${t.type}</span><span class="row-value">${t.device} | ${t.ids}</span><span class="row-value amount">${Utils.formatCurrency(t.amount)}</span><span class="text-muted text-sm">${t.payType} | ${Jalali.formatDateTime(t.time)}</span><button class="btn btn-sm btn-outline" onclick="Reports.editTransaction('${t.txType}', ${t.txId})">ویرایش</button></div>`).join("")}
+      ${all.map((t) => `<div class="list-row"><span class="row-label">${t.type}</span><span class="row-value">${t.device} | ${t.ids}</span><span class="row-value amount">${Utils.formatCurrency(t.amount)}</span><span class="text-muted text-sm">${t.payType} | ${Jalali.formatDateTime(t.time)}</span>${t.txType === "overnight" ? `<span class="text-muted text-sm">غیرقابل‌ویرایش</span>` : `<button class="btn btn-sm btn-outline" onclick="Reports.editTransaction('${t.txType}', ${t.txId})">ویرایش</button>`}</div>`).join("")}
     </div><div class="modal-actions"><button class="btn btn-outline" onclick="App.closeModalForce()">بستن</button></div>`);
   }
 
@@ -1065,6 +1117,9 @@ const Reports = (function () {
     let customers = await DB.getAll("customers");
     let devices = await DB.getAll("devices");
 
+    let overnightTxAll = await DB.getAll("overnightTransactions");
+    let overnightReservations = await DB.getAll("overnightReservations");
+
     let data = [];
     sessions.filter((s) => s.status === "settled" && s.settledAt && Utils.isInRange(s.settledAt, range.start, range.end)).forEach((s) => {
       let device = devices.find((d) => d.id === s.deviceId);
@@ -1080,6 +1135,10 @@ const Reports = (function () {
       let device = devices.find((d) => d.id === bp.deviceId);
       let c = customers.find((cu) => cu.id === bp.customerId);
       data.push({ "نوع": bp.deviceType === "tournament" ? "تسویه بازی مسابقه" : "تسویه بلوک", "دستگاه": device ? device.name : "", "شناسه‌ها": c ? "#" + (c.displayId || c.id) : "", "مبلغ": bp.amount, "روش": bp.payType, "تاریخ": Jalali.formatDateTime(bp.date), "تسویه‌کننده": bp.settlerName || "" });
+    });
+    overnightTxAll.filter((t) => (t.type === "payment" || t.type === "refund") && Utils.isInRange(t.timestamp, range.start, range.end) && t.status !== "voided").forEach((t) => {
+      let c = customers.find((cu) => cu.id === t.customerId);
+      data.push({ "نوع": (t.type === "refund" ? "استرداد رزرو شب" : "پرداخت رزرو شب") + " #" + t.reservationId, "دستگاه": "-", "شناسه‌ها": c ? "#" + (c.displayId || c.id) : "", "مبلغ": t.type === "refund" ? -t.amount : t.amount, "روش": t.payType, "تاریخ": Jalali.formatDateTime(t.timestamp), "تسویه‌کننده": t.settlerName || "" });
     });
     let ws = XLSX.utils.json_to_sheet(data);
     let wb = XLSX.utils.book_new();
@@ -1155,6 +1214,32 @@ const Reports = (function () {
         };
       }));
       XLSX.utils.book_append_sheet(wb, wsTournament, "تسویه مسابقات");
+    }
+
+    // Overnight reservation payments/refunds within the day, with the reservation's
+    // entrance/items/other charge split for context (charges themselves aren't
+    // dated events — only the money movement is — so this sheet shows both).
+    let dailyOvernightTx = overnightTxAll.filter((t) => (t.type === "payment" || t.type === "refund") && Utils.isInRange(t.timestamp, range.start, range.end) && t.status !== "voided");
+    if (dailyOvernightTx.length) {
+      let wsOvernight = XLSX.utils.json_to_sheet(dailyOvernightTx.map((t) => {
+        let c = customers.find((cu) => cu.id === t.customerId);
+        let r = overnightReservations.find((rr) => rr.id === t.reservationId);
+        let cb = t.categoryBreakdown || {};
+        return {
+          "رزرو": "#" + t.reservationId,
+          "شناسه مشتری": c ? "#" + (c.displayId || c.id) : "",
+          "نوع خدمت": r ? (r.type === "console" ? "کنسول" : r.type === "billiard" ? "بیلیارد" : "پی‌سی") : "",
+          "نوع تراکنش": t.type === "refund" ? "استرداد" : "پرداخت",
+          "مبلغ": t.type === "refund" ? -t.amount : t.amount,
+          "سهم ورودی": cb.entrance || 0,
+          "سهم آیتم‌ها": cb.items || 0,
+          "سهم سایر": cb.other || 0,
+          "روش": t.payType,
+          "تاریخ": Jalali.formatDateTime(t.timestamp),
+          "ثبت‌کننده": t.settlerName || "",
+        };
+      }));
+      XLSX.utils.book_append_sheet(wb, wsOvernight, "رزروهای شب");
     }
 
     XLSX.writeFile(wb, "گزارش_روزانه_" + Jalali.formatDate(new Date()).replace(/\//g, "-") + ".xlsx");

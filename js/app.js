@@ -14,6 +14,7 @@ const App = (function () {
       id: "sales", label: "فروش و خدمات", items: [
         { tab: "cafe", icon: "cafe", label: "کافی‌شاپ" },
         { tab: "games", icon: "games", label: "بازی‌ها" },
+        { tab: "overnight", icon: "overnight", label: "رزروهای شب" },
       ],
     },
     {
@@ -254,6 +255,9 @@ const App = (function () {
         break;
       case "tournaments":
         Tournaments.render(document.getElementById("tab-tournaments"));
+        break;
+      case "overnight":
+        Overnight.render(document.getElementById("tab-overnight"));
         break;
     }
   }

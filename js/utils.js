@@ -292,8 +292,31 @@ const Utils = (function () {
     return Math.max(manualDiscount, rankDiscount);
   }
 
+  // Splits a leg-object ({cash,card,wallet,debt}, e.g. the payBreakdown produced
+  // by computePaymentUpdate) across categories (e.g. entrance/items/other) using
+  // a categoryBreakdown ({entrance,items,other}) whose values sum to the same
+  // total amount the legs represent. Used so a single overnight payment that
+  // covers several charge categories at once can still be reported per category
+  // without re-deriving the split later from incomplete information.
+  function splitLegsByCategory(overallLegs, categoryBreakdown, categories) {
+    let result = {};
+    let cb = categoryBreakdown || {};
+    let sum = categories.reduce((s, cat) => s + (cb[cat] || 0), 0);
+    categories.forEach((cat) => {
+      let frac = sum > 0 ? (cb[cat] || 0) / sum : (cat === categories[categories.length - 1] ? 1 : 0);
+      result[cat] = {
+        cash: (overallLegs.cash || 0) * frac,
+        card: (overallLegs.card || 0) * frac,
+        wallet: (overallLegs.wallet || 0) * frac,
+        debt: (overallLegs.debt || 0) * frac,
+      };
+    });
+    return result;
+  }
+
   return {
     getReportRange, getCurrentReportRange, getBusinessDayKey, roundPrice, generateId,
+    splitLegsByCategory,
     formatCurrency, formatCurrencyShort, calculateTimeBlocksPrice,
     calculateSessionDuration, formatDuration, formatTimerDisplay,
     isInRange, escapeHtml, renderSelectLabel,
