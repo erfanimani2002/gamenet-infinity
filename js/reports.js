@@ -436,7 +436,7 @@ const Reports = (function () {
             // Day has ended but staff hasn't confirmed the till yet.
             statusHtml = `<button class="btn btn-sm btn-outline" style="margin-right:8px" onclick="Reports.showDayRecon('${key}', '${range.start.toISOString()}', '${range.end.toISOString()}')">تطبیق صندوق</button>`;
           } else {
-            statusHtml = `<span class="text-muted text-sm" style="margin-right:8px">شمارش: ${Utils.formatCurrency(summary.cashCounted)} | کارتخوان: ${Utils.formatCurrency(summary.cardReceived || 0)} | اختلاف نقدی: ${Utils.formatCurrency(summary.diffCash || 0)} | اختلاف کارت: ${Utils.formatCurrency(summary.diffCard || 0)}</span>
+            statusHtml = `<span class="text-muted text-sm" style="margin-right:8px">شمارش: ${Utils.formatCurrency(summary.cashCounted)} | کارتخوان: ${Utils.formatCurrency(summary.cardReceived || 0)} | اختلاف نقدی: <span class="${(summary.diffCash || 0) < 0 ? 'amount negative' : ''}">${Utils.formatCurrency(summary.diffCash || 0)}</span> | اختلاف کارت: <span class="${(summary.diffCard || 0) < 0 ? 'amount negative' : ''}">${Utils.formatCurrency(summary.diffCard || 0)}</span></span>
               <button class="btn btn-sm btn-outline" style="margin-right:8px" onclick="Reports.showDayRecon('${key}', '${range.start.toISOString()}', '${range.end.toISOString()}')">ویرایش تطبیق</button>`;
           }
 
@@ -550,7 +550,6 @@ const Reports = (function () {
         <div class="summary-item"><div class="summary-label">نقدی پرداختی</div><div class="summary-value amount negative">${Utils.formatCurrency(summary.cashOut)}</div></div>
         <div class="summary-item"><div class="summary-label">مانده نقدی</div><div class="summary-value font-bold">${Utils.formatCurrency(netCash)}</div></div>
       </div>
-      <div class="text-muted text-sm" style="margin-top:4px">توجه: خریدهای پاسارگاد در جمع کارتخوان (POS) لحاظ نشده‌اند؛ کارتخوان فقط دریافتی‌های کارتی مشتریان است.</div>
       <div class="form-inline" style="margin-top:12px">
         <div class="form-group"><label>مبلغ شمارش‌شده صندوق</label><input type="number" id="reconCashCounted" placeholder="0" min="0" value="${summary.cashCounted != null ? summary.cashCounted : ''}" oninput="Reports.previewDayRecon(${netCash}, ${summary.cardIn})"></div>
         <div class="form-group"><label>مبلغ کارتخوان</label><input type="number" id="reconCardReceived" placeholder="0" min="0" value="${summary.cardReceived != null ? summary.cardReceived : ''}" oninput="Reports.previewDayRecon(${netCash}, ${summary.cardIn})"></div>

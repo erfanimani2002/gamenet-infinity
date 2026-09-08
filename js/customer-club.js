@@ -168,18 +168,18 @@ const CustomerClub = (function () {
     let topBySpending = [...customers].sort((a, b) => (b.totalPaid || 0) - (a.totalPaid || 0)).slice(0, 10);
     let topBySessions = [...customers].sort((a, b) => (sessionStatsMap[b.id]?.count || 0) - (sessionStatsMap[a.id]?.count || 0)).slice(0, 10);
 
-    let leaderboardSpendingHtml = topBySpending.map((c, i) => {
+    let leaderboardSpendingHtml = topBySpending.length > 0 ? `<ol style="list-style:none;padding:0;margin:0;">${topBySpending.map((c, i) => {
       let rank = ranksMap[c.id];
       let badge = rank ? `<span class="rank-badge rank-sm" style="background:${Utils.escapeHtml(rank.color)}">${Utils.escapeHtml(rank.category)}</span>` : "";
-      return `<div class="list-row"><span class="row-label">#${i + 1} ${Utils.escapeHtml(c.firstName)} ${Utils.escapeHtml(c.lastName)} ${badge}</span><span class="row-value">${Utils.formatCurrency(c.totalPaid || 0)}</span></div>`;
-    }).join("");
+      return `<li style="display:flex;align-items:center;justify-content:space-between;padding:8px 12px;border-bottom:1px solid var(--border);"><span style="display:flex;align-items:center;gap:8px;"><span style="min-width:24px;text-align:center;font-weight:700;color:var(--text-muted);">${i + 1}.</span>${Utils.escapeHtml(c.firstName)} ${Utils.escapeHtml(c.lastName)} ${badge}</span><span style="font-weight:600;">${Utils.formatCurrency(c.totalPaid || 0)}</span></li>`;
+    }).join("")}</ol>` : "";
 
-    let leaderboardSessionsHtml = topBySessions.map((c, i) => {
+    let leaderboardSessionsHtml = topBySessions.length > 0 ? `<ol style="list-style:none;padding:0;margin:0;">${topBySessions.map((c, i) => {
       let ss = sessionStatsMap[c.id];
       let rank = ranksMap[c.id];
       let badge = rank ? `<span class="rank-badge rank-sm" style="background:${Utils.escapeHtml(rank.color)}">${Utils.escapeHtml(rank.category)}</span>` : "";
-      return `<div class="list-row"><span class="row-label">#${i + 1} ${Utils.escapeHtml(c.firstName)} ${Utils.escapeHtml(c.lastName)} ${badge}</span><span class="row-value">${ss ? ss.count : 0} جلسه</span></div>`;
-    }).join("");
+      return `<li style="display:flex;align-items:center;justify-content:space-between;padding:8px 12px;border-bottom:1px solid var(--border);"><span style="display:flex;align-items:center;gap:8px;"><span style="min-width:24px;text-align:center;font-weight:700;color:var(--text-muted);">${i + 1}.</span>${Utils.escapeHtml(c.firstName)} ${Utils.escapeHtml(c.lastName)} ${badge}</span><span style="font-weight:600;">${ss ? ss.count : 0} جلسه</span></li>`;
+    }).join("")}</ol>` : "";
 
     el.innerHTML = `
       <div class="card">

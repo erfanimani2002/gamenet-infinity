@@ -160,7 +160,7 @@ const Staff = (function () {
     document.getElementById("staffTabContent").innerHTML = `
       <div id="statsSection">
         <h3>آمار ماه جاری (${jalaliToday.year}/${jalaliToday.month})</h3>
-        <div class="list-row"><span class="row-label">ساعات کار امروز (تبری)</span><span class="row-value font-bold">${todayHours.toFixed(1)} ساعت</span></div>
+        <div class="list-row"><span class="row-label">ساعات کار امروز</span><span class="row-value font-bold">${todayHours.toFixed(1)} ساعت</span></div>
         <div class="list-row"><span class="row-label">ساعات کار (این ماه)</span><span class="row-value font-bold">${totalMonthlyHours.toFixed(1)} ساعت</span></div>
         <div class="list-row"><span class="row-label">تعداد شیفت</span><span class="row-value">${monthlyShifts.length}</span></div>
         <div class="list-row"><span class="row-label">مجموع مصرف</span><span class="row-value amount">${Utils.formatCurrency(totalConsumption)}</span></div>
