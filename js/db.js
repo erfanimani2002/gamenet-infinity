@@ -148,7 +148,22 @@ const DB = (function () {
   async function getByIndex(storeName, indexName, value) {
     await open();
     let store = getStore(storeName, "readonly");
-    let index = store.index(indexName);
+    let index;
+    try {
+      index = store.index(indexName);
+    } catch (e) {
+      // Index doesn't exist in this DB version — fall back to a full scan.
+      // We need the index's keyPath to filter correctly; look it up from
+      // the INDEXES definition for this store.
+      let keyPath = null;
+      if (INDEXES[storeName]) {
+        let def = INDEXES[storeName].find((d) => d.name === indexName);
+        if (def) keyPath = def.keyPath;
+      }
+      if (!keyPath) keyPath = indexName; // last resort: use indexName as field
+      let all = await reqToPromise(store.getAll());
+      return (all || []).filter((record) => record[keyPath] === value);
+    }
     let result = await reqToPromise(index.getAll(value));
     return result || [];
   }

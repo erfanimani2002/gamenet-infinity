@@ -546,7 +546,11 @@ const Overnight = (function () {
       if (!customer) { App.toast("مشتری یافت نشد"); return { success: false }; }
       let updated = { ...customer };
       if (method === "wallet") {
-        updated.wallet = (updated.wallet || 0) + amount; // store credit — no totalPaid change
+        updated.wallet = (updated.wallet || 0) + amount;
+        // The original wallet payment increased totalPaid; the refund credits
+        // the wallet but the money hasn't actually left the till, so reverse
+        // the totalPaid increase to keep lifetime spending accurate.
+        updated.totalPaid = Math.max(0, (updated.totalPaid || 0) - amount);
       } else if (method === "debt") {
         updated.debt = Math.max(0, (updated.debt || 0) - amount); // forgiving debt incurred at payment time
       } else {

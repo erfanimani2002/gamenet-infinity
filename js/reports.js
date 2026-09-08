@@ -897,7 +897,26 @@ const Reports = (function () {
     if (type === "session") {
       let session = await DB.get("sessions", id);
       if (session) {
+        // Staleness guard: compute the session's current block+item total from
+        // the fresh DB record.  If items were added/removed or blocks were
+        // opened/closed after the modal was shown, the amount displayed in the
+        // modal is stale.  Rather than silently applying a wrong amount, warn
+        // the operator so they can reopen the modal with fresh data.
+        let currentBlockTotal = (session.timeBlocks || []).reduce((s, b) => s + (b.price || 0), 0);
+        let currentItemsTotal = (session.items || []).reduce((s, i) => s + (i.price * i.qty), 0);
+        let currentSessionTotal = currentBlockTotal + currentItemsTotal;
+        if (session.discount) currentSessionTotal = Math.max(0, currentSessionTotal - session.discount);
         let oldAmount = session.settleAmount || 0;
+        // If the modal's pre-filled value differs from what the session currently
+        // costs and the user didn't change it, warn.  We detect "user didn't
+        // change" by comparing with the displayed amount we stored on the modal.
+        // Since we don't store the original display value, we skip the warning
+        // when newAmount === oldAmount (user accepted the default) and the
+        // underlying session total has drifted.
+        if (newAmount === oldAmount && currentSessionTotal > 0 && oldAmount !== currentSessionTotal) {
+          App.toast("توجه: مبلغ سشن از زمان باز شدن فرم تغییر کرده است. لطفاً فرم را ببندید و دوباره باز کنید.");
+          return;
+        }
         let oldPayType = session.settlePayType || "cash";
         let oldBreakdown = session.payBreakdown;
         let customerId = session.settlePayerId || (session.ids && session.ids[0]) || null;

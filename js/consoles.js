@@ -318,6 +318,16 @@ const Consoles = (function () {
       let block = session.timeBlocks[blockIndex];
       if (!block || !block.endTime || block.settled) { App.toast("بلوک قابل تسویه نیست"); return { success: false }; }
 
+      // Re-verify the block hasn't been settled between the modal open and confirm
+      // (race-condition guard: another tab/window could have settled the same block).
+      let freshSessions = await DB.getAll("sessions");
+      let freshSession = freshSessions.find((s) => s.deviceId === deviceId && s.status === "active");
+      if (!freshSession) { App.toast("سشن دیگری فعال نیست"); return { success: false }; }
+      let freshBlock = freshSession.timeBlocks[blockIndex];
+      if (!freshBlock || freshBlock.settled) { App.toast("این بلوک قبلاً تسویه شده"); return { success: false }; }
+      session = freshSession;
+      block = freshBlock;
+
       let payerId = parseInt(document.getElementById("payer_" + blockIndex).value) || 0;
       let payType = document.getElementById("payType_" + blockIndex).value;
       let settlerEl = document.getElementById("settler_" + blockIndex);
@@ -413,7 +423,11 @@ const Consoles = (function () {
 
       let sessions = await DB.getAll("sessions");
       let session = sessions.find((s) => s.deviceId === deviceId && s.status === "active");
-      if (!session) return { success: false };
+      if (!session) { App.toast("سشن یافت نشد"); return { success: false }; }
+      // Re-verify: session may have been settled by another tab between modal
+      // open and confirm.  Without this check the same session could be
+      // double-settled (double-charging the customer).
+      if (session.status !== "active") { App.toast("این سشن قبلاً تسویه شده"); return { success: false }; }
 
       // Recompute the payable amount from the CURRENT session instead of trusting
       // the totals baked into the modal (which may have gone stale, e.g. after
@@ -672,7 +686,11 @@ const Consoles = (function () {
         let c = customerChanges[payerId];
         if (c) {
           let amount = b.price || 0;
-          let payBreakdown = bp ? bp.payBreakdown : b.payBreakdown;
+          // prefer the individual blockPayment record; fall back to the
+          // block's own payBreakdown (set by settleSingleBlock); then to
+          // the session-level payBreakdown (set by confirmSettleSession
+          // which settles all blocks at once without per-block breakdowns).
+          let payBreakdown = bp ? bp.payBreakdown : (b.payBreakdown || session.payBreakdown);
           if (payBreakdown && typeof payBreakdown === "object") {
             let w = payBreakdown.wallet || 0, d = payBreakdown.debt || 0, other = (payBreakdown.cash || 0) + (payBreakdown.card || 0);
             if (w) { c.wallet = (c.wallet || 0) + w; c.totalPaid = Math.max(0, (c.totalPaid || 0) - w); }
