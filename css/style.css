@@ -2001,7 +2001,7 @@ canvas { width: 100% !important; max-height: 300px; }
   background: var(--bg-glass);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
-  padding: 16px;
+  padding: 10px 12px;
   cursor: pointer;
   transition: all var(--duration-sm) var(--ease);
 }
@@ -2014,15 +2014,15 @@ canvas { width: 100% !important; max-height: 300px; }
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 8px;
+  margin-bottom: 4px;
 }
 .club-card-name {
   font-weight: 600;
-  font-size: 1rem;
+  font-size: 0.85rem;
   color: var(--text);
 }
 .club-card-id {
-  font-size: 0.8rem;
+  font-size: 0.7rem;
   color: var(--text-secondary);
   margin-inline-start: 6px;
 }
@@ -2043,7 +2043,7 @@ canvas { width: 100% !important; max-height: 300px; }
   padding: 1px 6px;
 }
 .club-card-interests {
-  margin-bottom: 8px;
+  margin-bottom: 4px;
 }
 .interest-chip {
   display: inline-block;
@@ -2060,8 +2060,8 @@ canvas { width: 100% !important; max-height: 300px; }
 }
 .club-card-stats {
   display: flex;
-  gap: 12px;
-  margin-bottom: 8px;
+  gap: 6px;
+  margin-bottom: 4px;
 }
 .club-stat {
   display: flex;
@@ -2070,19 +2070,19 @@ canvas { width: 100% !important; max-height: 300px; }
   flex: 1;
 }
 .club-stat-value {
-  font-size: 0.95rem;
+  font-size: 0.8rem;
   font-weight: 600;
   color: var(--text);
 }
 .club-stat-label {
-  font-size: 0.7rem;
+  font-size: 0.65rem;
   color: var(--text-secondary);
 }
 .club-card-info {
   display: flex;
   justify-content: space-between;
-  font-size: 0.75rem;
+  font-size: 0.7rem;
   color: var(--text-secondary);
-  padding-top: 8px;
+  padding-top: 4px;
   border-top: 1px solid var(--border);
 }
