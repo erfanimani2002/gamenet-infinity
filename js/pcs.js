@@ -295,13 +295,13 @@ const PCs = (function () {
     if (unsettledBlocks.length === 0) { App.toast("بلوک تسویه‌نشده‌ای وجود ندارد"); return; }
 
     let customers = await DB.getAll("customers");
-    let defaultPayerId = (session.ids || [])[0];
     let settlerHtml = await Utils.renderSettlerSelect();
 
     App.openModal(`
       <h2>تسویه بلوک‌های زمانی پی‌سی</h2>
       ${unsettledBlocks.map((b) => {
         let dur = Utils.formatDuration(new Date(b.endTime) - new Date(b.startTime));
+        let blockDefaultPayerId = b.expectedPayerId || (session.ids || [])[0];
         return `
           <div class="session-detail" style="margin-bottom:12px;">
             <div class="flex-between mb-2">
@@ -310,7 +310,7 @@ const PCs = (function () {
             </div>
             <div class="text-muted text-sm mb-2">${dur}</div>
             <div class="form-inline">
-              <div class="form-group"><label>پرداخت‌کننده</label>${Utils.renderPayerSelect(customers, defaultPayerId, "payer_" + b.index)}</div>
+              <div class="form-group"><label>پرداخت‌کننده</label>${Utils.renderPayerSelect(customers, blockDefaultPayerId, "payer_" + b.index)}</div>
               <div class="form-group"><label>روش</label><select id="payType_${b.index}"><option value="wallet">کیف‌پول</option><option value="debt">بدهکاری</option><option value="cash">نقدی</option><option value="card">کارتی</option></select></div>
               <div class="form-group"><label>تسویه‌کننده</label>${settlerHtml.replace('id="settlerSelect"', 'id="settler_' + b.index + '"')}</div>
               <button class="btn btn-sm btn-success" onclick="PCs.settleSingleBlock(${deviceId}, ${b.index})">تسویه این بلوک</button>
