@@ -209,10 +209,11 @@ const Consoles = (function () {
       App.toast("این دستگاه در حال استفاده در یک مسابقه است");
       return;
     }
-    let controllerCount = parseInt(document.getElementById("sControllerCount").value);
+    let controllerCount = parseInt(document.getElementById("sControllerCount").value) || 1;
     let pricing = await DB.getSetting("pricing", {});
     let rates = pricing.consoleRates || { 1: 5000, 2: 7000, 3: 9000, 4: 11000 };
-    let rate = rates[controllerCount] || rates[1];
+    // Ensure rate is always valid: fallback to rate[1] if controllerCount is invalid
+    let rate = rates[controllerCount] || rates[1] || 5000;
 
     let startTime = new Date();
     let timeInput = document.getElementById("sStartTime").value;
@@ -416,19 +417,7 @@ const Consoles = (function () {
     let session = sessions.find((s) => s.deviceId === deviceId && s.status === "active");
     if (!session) return;
 
-    // Preview-only projection of the currently-open block's price. This must NOT
-    // mutate session.timeBlocks or persist via DB.put — this modal can be cancelled,
-    // and the real close-and-persist happens in confirmSettleSession on confirmation.
-    let lastBlock = session.timeBlocks[session.timeBlocks.length - 1];
-    let projectedOpenBlockPrice = null;
-    if (lastBlock && !lastBlock.endTime) {
-      let projectedEndTime = new Date().toISOString();
-      let hours = (new Date(projectedEndTime) - new Date(lastBlock.startTime)) / 3600000;
-      let pricing = await DB.getSetting("pricing", {});
-      projectedOpenBlockPrice = Utils.roundPrice(hours * lastBlock.rate, pricing.roundingUnit || 1000);
-    }
-
-    let totalBlocks = session.timeBlocks.filter((b) => !b.settled).reduce((s, b) => s + (b === lastBlock ? (projectedOpenBlockPrice || 0) : (b.price || 0)), 0);
+    let totalBlocks = session.timeBlocks.filter((b) => !b.settled).reduce((s, b) => s + (b.price || 0), 0);
     let totalItems = (session.items || []).reduce((s, i) => s + (i.price * i.qty), 0);
     let total = totalBlocks + totalItems;
 

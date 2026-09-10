@@ -262,7 +262,9 @@ const Utils = (function () {
     let rates = deviceType === "billiard" ? (pricing.billiardRates || {}) : (pricing.consoleRates || {});
     let defaultCount = deviceType === "billiard" ? 2 : 1;
     let fallbackRate = deviceType === "billiard" ? 8000 : 5000;
-    let count = rates[controllerCount] != null ? controllerCount : defaultCount;
+    // Ensure count is valid: if rates[controllerCount] doesn't exist, use defaultCount
+    let count = (rates[controllerCount] != null && rates[controllerCount] !== undefined) ? controllerCount : defaultCount;
+    // Ensure rate is always valid
     let rate = rates[count] != null ? rates[count] : fallbackRate;
     return { rate, controllerCount: count };
   }
