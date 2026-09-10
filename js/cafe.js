@@ -113,12 +113,24 @@ const Cafe = (function () {
       </div>
       <div class="form-group">
         <label>روش پرداخت</label>
-        <select id="cafePayType">
+        <select id="cafePayType" onchange="Cafe.toggleCombinedPayment()">
           <option value="cash">نقدی</option>
           <option value="card">کارتی</option>
           <option value="wallet">کیف‌پول</option>
           <option value="debt">بدهکاری</option>
+          <option value="combined">ترکیبی (نقدی + کارتی)</option>
         </select>
+      </div>
+      <div id="combinedPaymentFields" style="display:none; margin-top:8px;">
+        <div class="form-group">
+          <label>مبلغ کارتی</label>
+          <input type="number" id="combinedCardAmount" min="0" placeholder="مبلغ کارتی" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:var(--radius-sm);box-sizing:border-box;" oninput="Cafe.updateCombinedTotalCheck(${total})">
+        </div>
+        <div class="form-group">
+          <label>مبلغ نقدی</label>
+          <input type="number" id="combinedCashAmount" min="0" placeholder="مبلغ نقدی" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:var(--radius-sm);box-sizing:border-box;" oninput="Cafe.updateCombinedTotalCheck(${total})">
+        </div>
+        <div class="text-muted text-sm" id="combinedTotalCheck" style="margin-top:4px;"></div>
       </div>
       <div class="list-row font-bold">
         <span class="row-label">جمع کل</span>
@@ -156,6 +168,32 @@ const Cafe = (function () {
     });
   }
 
+  function toggleCombinedPayment() {
+    let payType = document.getElementById("cafePayType").value;
+    let combinedFields = document.getElementById("combinedPaymentFields");
+    let total = cart.reduce((sum, item) => sum + (item.price * item.qty), 0);
+    if (payType === "combined") {
+      combinedFields.style.display = "block";
+      updateCombinedTotalCheck(total);
+    } else {
+      combinedFields.style.display = "none";
+    }
+  }
+
+  function updateCombinedTotalCheck(total) {
+    let cardAmt = parseInt(document.getElementById("combinedCardAmount").value) || 0;
+    let cashAmt = parseInt(document.getElementById("combinedCashAmount").value) || 0;
+    let sum = cardAmt + cashAmt;
+    let checkEl = document.getElementById("combinedTotalCheck");
+    if (sum === total) {
+      checkEl.innerHTML = "✓ جمع مبلغ‌ها با کل مطابقت دارد";
+      checkEl.style.color = "green";
+    } else {
+      checkEl.innerHTML = "⚠ جمع مبلغ‌ها: " + Utils.formatCurrency(sum) + " (کل: " + Utils.formatCurrency(total) + ")";
+      checkEl.style.color = "red";
+    }
+  }
+
   async function placeOrder() {
     await Utils.guardDoubleClick(async () => {
       if (!selectedCustomerId) {
@@ -165,6 +203,17 @@ const Cafe = (function () {
       let payType = document.getElementById("cafePayType").value;
       let total = cart.reduce((sum, item) => sum + (item.price * item.qty), 0);
       if (total <= 0) { App.toast("سبد خرید خالی است"); return { success: false }; }
+
+      // Handle combined payment: gather breakdown from input fields
+      if (payType === "combined") {
+        let cardAmt = parseInt(document.getElementById("combinedCardAmount").value) || 0;
+        let cashAmt = parseInt(document.getElementById("combinedCashAmount").value) || 0;
+        if (cardAmt + cashAmt !== total) {
+          App.toast("جمع مبلغ‌های کارتی و نقدی باید برابر کل باشد");
+          return { success: false };
+        }
+        payType = { card: cardAmt, cash: cashAmt };
+      }
 
       // Re-check stock now (reserved at checkout, not add-to-cart) and capture
       // the live cafeItems rows so stock can be deducted in the SAME atomic
@@ -185,7 +234,7 @@ const Cafe = (function () {
       let customer = await DB.get("customers", selectedCustomerId);
       if (!customer) { App.toast("مشتری یافت نشد"); return { success: false }; }
       let payResult = Utils.computePaymentUpdate(customer, total, payType);
-      if (!payResult.success) { App.toast("پرداخت ناموفق بود"); return { success: false }; }
+      if (!payResult.success) { App.toast("پرداخت ناموفق بود: " + payResult.reason); return { success: false }; }
 
       let order = {
         customerId: selectedCustomerId,
@@ -229,5 +278,5 @@ const Cafe = (function () {
     }
   }
 
-  return { render, addToCart, removeFromCart, showNewOrder, placeOrder, filterCustomers, pickCustomer, quickCreateCustomer, refresh };
+  return { render, addToCart, removeFromCart, showNewOrder, placeOrder, filterCustomers, pickCustomer, quickCreateCustomer, refresh, toggleCombinedPayment, updateCombinedTotalCheck };
 })();

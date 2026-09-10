@@ -1093,7 +1093,12 @@ const Tournaments = (function () {
       <hr class="section-divider">
       <div class="form-group"><label>پرداخت‌کننده</label>${Utils.renderPayerSelect(customers, participantId, "entryPayerId")}</div>
       <div class="form-group"><label>روش پرداخت</label>
-        <select id="entryPayType"><option value="wallet">کیف‌پول</option><option value="debt">بدهکاری</option><option value="cash">نقدی</option><option value="card">کارتی</option></select>
+        <select id="entryPayType" onchange="Tournaments.toggleCombinedPayment('entryPayType', 'entryCombinedFields', ${t.entryFee})"><option value="wallet">کیف‌پول</option><option value="debt">بدهکاری</option><option value="cash">نقدی</option><option value="card">کارتی</option><option value="combined">ترکیبی (نقدی + کارتی)</option></select>
+      </div>
+      <div id="entryCombinedFields" style="display:none; margin-top:8px;">
+        <div class="form-group"><label>مبلغ کارتی</label><input type="number" id="entryCombinedCardAmount" min="0" oninput="Tournaments.updateCombinedCheck('entryCombinedCardAmount', 'entryCombinedCashAmount', 'entryCombinedCheck', ${t.entryFee})"></div>
+        <div class="form-group"><label>مبلغ نقدی</label><input type="number" id="entryCombinedCashAmount" min="0" oninput="Tournaments.updateCombinedCheck('entryCombinedCardAmount', 'entryCombinedCashAmount', 'entryCombinedCheck', ${t.entryFee})"></div>
+        <div id="entryCombinedCheck" class="text-sm" style="margin-top:4px;"></div>
       </div>
       <div class="form-group"><label>تسویه‌کننده</label>${settlerHtml}</div>
       <div class="modal-actions">
@@ -1114,6 +1119,12 @@ const Tournaments = (function () {
       }
       let payerId = parseInt(document.getElementById("entryPayerId").value) || participantId;
       let payType = document.getElementById("entryPayType").value;
+      if (payType === "combined") {
+        let cardAmt = parseInt(document.getElementById("entryCombinedCardAmount").value) || 0;
+        let cashAmt = parseInt(document.getElementById("entryCombinedCashAmount").value) || 0;
+        if (cardAmt + cashAmt !== t.entryFee) { App.toast("مبلغ‌ها با کل مطابقت ندارد"); return { success: false }; }
+        payType = { card: cardAmt, cash: cashAmt };
+      }
       let settlerName = Utils.getSettlerName();
 
       let customer = await DB.get("customers", payerId);
@@ -1163,7 +1174,12 @@ const Tournaments = (function () {
       <hr class="section-divider">
       <div class="form-group"><label>پرداخت‌کننده</label>${Utils.renderPayerSelect(customers, loserId, "matchPayerId")}</div>
       <div class="form-group"><label>روش پرداخت</label>
-        <select id="matchPayType"><option value="wallet">کیف‌پول</option><option value="debt">بدهکاری</option><option value="cash">نقدی</option><option value="card">کارتی</option></select>
+        <select id="matchPayType" onchange="Tournaments.toggleCombinedPayment('matchPayType', 'matchCombinedFields', ${total})"><option value="wallet">کیف‌پول</option><option value="debt">بدهکاری</option><option value="cash">نقدی</option><option value="card">کارتی</option><option value="combined">ترکیبی (نقدی + کارتی)</option></select>
+      </div>
+      <div id="matchCombinedFields" style="display:none; margin-top:8px;">
+        <div class="form-group"><label>مبلغ کارتی</label><input type="number" id="matchCombinedCardAmount" min="0" oninput="Tournaments.updateCombinedCheck('matchCombinedCardAmount', 'matchCombinedCashAmount', 'matchCombinedCheck', ${total})"></div>
+        <div class="form-group"><label>مبلغ نقدی</label><input type="number" id="matchCombinedCashAmount" min="0" oninput="Tournaments.updateCombinedCheck('matchCombinedCardAmount', 'matchCombinedCashAmount', 'matchCombinedCheck', ${total})"></div>
+        <div id="matchCombinedCheck" class="text-sm" style="margin-top:4px;"></div>
       </div>
       <div class="form-group"><label>تسویه‌کننده</label>${settlerHtml}</div>
       <div class="modal-actions">
@@ -1180,6 +1196,12 @@ const Tournaments = (function () {
       if (match.settled) { App.toast("این بازی قبلاً تسویه شده"); return { success: false }; }
       let payerId = parseInt(document.getElementById("matchPayerId").value) || 0;
       let payType = document.getElementById("matchPayType").value;
+      if (payType === "combined") {
+        let cardAmt = parseInt(document.getElementById("matchCombinedCardAmount").value) || 0;
+        let cashAmt = parseInt(document.getElementById("matchCombinedCashAmount").value) || 0;
+        if (cardAmt + cashAmt !== effectiveTotal) { App.toast("مبلغ‌ها با کل مطابقت ندارد"); return { success: false }; }
+        payType = { card: cardAmt, cash: cashAmt };
+      }
       let settlerName = Utils.getSettlerName();
 
       // Recompute the total from the match itself, not the amount baked into the
@@ -1238,7 +1260,12 @@ const Tournaments = (function () {
       <div class="list-row"><span class="row-label">تعداد بازی‌ها</span><span class="row-value">${unsettled.length}</span></div>
       <div class="text-muted text-sm" style="margin-bottom:8px;">هزینه هر بازی از بازنده آن بازی دریافت می‌شود.</div>
       <div class="form-group"><label>روش پرداخت (برای همه بازی‌ها)</label>
-        <select id="bulkSettlePayType"><option value="cash">نقدی</option><option value="card">کارتی</option><option value="wallet">کیف‌پول</option><option value="debt">بدهکاری</option></select>
+        <select id="bulkSettlePayType" onchange="Tournaments.toggleCombinedPayment('bulkSettlePayType', 'bulkCombinedFields', ${total})"><option value="cash">نقدی</option><option value="card">کارتی</option><option value="wallet">کیف‌پول</option><option value="debt">بدهکاری</option><option value="combined">ترکیبی (نقدی + کارتی)</option></select>
+      </div>
+      <div id="bulkCombinedFields" style="display:none; margin-top:8px;">
+        <div class="form-group"><label>مبلغ کارتی</label><input type="number" id="bulkCombinedCardAmount" min="0" oninput="Tournaments.updateCombinedCheck('bulkCombinedCardAmount', 'bulkCombinedCashAmount', 'bulkCombinedCheck', ${total})"></div>
+        <div class="form-group"><label>مبلغ نقدی</label><input type="number" id="bulkCombinedCashAmount" min="0" oninput="Tournaments.updateCombinedCheck('bulkCombinedCardAmount', 'bulkCombinedCashAmount', 'bulkCombinedCheck', ${total})"></div>
+        <div id="bulkCombinedCheck" class="text-sm" style="margin-top:4px;"></div>
       </div>
       <div class="modal-actions">
         <button class="btn btn-success" onclick="Tournaments.confirmSettleAllMatches(${tournamentId})">تسویه</button>
@@ -1252,6 +1279,20 @@ const Tournaments = (function () {
       let t = await DB.get("tournaments", tournamentId);
       if (!t) return { success: false };
       let payType = document.getElementById("bulkSettlePayType")?.value || "cash";
+      if (payType === "combined") {
+        let cardAmt = parseInt(document.getElementById("bulkCombinedCardAmount").value) || 0;
+        let cashAmt = parseInt(document.getElementById("bulkCombinedCashAmount").value) || 0;
+        let totalGrand = 0;
+        let matches;
+        try { matches = await DB.getByIndex("matches", "by_tournament", tournamentId); } catch (e) { matches = (await DB.getAll("matches")).filter((m) => m.tournamentId === tournamentId); }
+        let unsettled = matches.filter((m) => !m.settled && ((m.deviceCost || 0) > 0 || (m.items || []).length > 0));
+        for (let m of unsettled) {
+          let totalItems = (m.items || []).reduce((s, i) => s + (i.price * i.qty), 0);
+          totalGrand += (m.deviceCost || 0) + totalItems;
+        }
+        if (cardAmt + cashAmt !== totalGrand) { App.toast("مبلغ‌ها با کل مطابقت ندارد"); return { success: false }; }
+        payType = { card: cardAmt, cash: cashAmt };
+      }
       let matches;
       try { matches = await DB.getByIndex("matches", "by_tournament", tournamentId); } catch (e) { matches = (await DB.getAll("matches")).filter((m) => m.tournamentId === tournamentId); }
 
@@ -1321,7 +1362,12 @@ const Tournaments = (function () {
       <hr class="section-divider">
       <div class="form-group"><label>برنده</label><select id="prizeWinnerId">${customerOptions}</select></div>
       <div class="form-group"><label>نحوه پرداخت</label>
-        <select id="prizePayoutMethod"><option value="cash">نقد (از صندوق)</option><option value="card">کارتی</option><option value="wallet">افزودن به کیف‌پول</option></select>
+        <select id="prizePayoutMethod" onchange="Tournaments.toggleCombinedPayment('prizePayoutMethod', 'prizeCombinedFields', ${prize.amount})"><option value="cash">نقد (از صندوق)</option><option value="card">کارتی</option><option value="wallet">افزودن به کیف‌پول</option><option value="combined">ترکیبی (نقدی + کارتی)</option></select>
+      </div>
+      <div id="prizeCombinedFields" style="display:none; margin-top:8px;">
+        <div class="form-group"><label>مبلغ کارتی</label><input type="number" id="prizeCombinedCardAmount" min="0" oninput="Tournaments.updateCombinedCheck('prizeCombinedCardAmount', 'prizeCombinedCashAmount', 'prizeCombinedCheck', ${prize.amount})"></div>
+        <div class="form-group"><label>مبلغ نقدی</label><input type="number" id="prizeCombinedCashAmount" min="0" oninput="Tournaments.updateCombinedCheck('prizeCombinedCardAmount', 'prizeCombinedCashAmount', 'prizeCombinedCheck', ${prize.amount})"></div>
+        <div id="prizeCombinedCheck" class="text-sm" style="margin-top:4px;"></div>
       </div>
       <div class="modal-actions">
         <button class="btn btn-success" onclick="Tournaments.confirmPayoutPrize(${tournamentId}, ${place})">پرداخت</button>
@@ -1341,18 +1387,33 @@ const Tournaments = (function () {
 
       let winnerId = parseInt(document.getElementById("prizeWinnerId").value) || 0;
       let method = document.getElementById("prizePayoutMethod").value;
+      if (method === "combined") {
+        let cardAmt = parseInt(document.getElementById("prizeCombinedCardAmount").value) || 0;
+        let cashAmt = parseInt(document.getElementById("prizeCombinedCashAmount").value) || 0;
+        if (cardAmt + cashAmt !== prize.amount) { App.toast("مبلغ‌ها با کل مطابقت ندارد"); return { success: false }; }
+        method = { card: cardAmt, cash: cashAmt };
+      }
       if (!winnerId) { App.toast("برنده را انتخاب کنید"); return { success: false }; }
 
       // A cash/card payout is money leaving the till (like a purchase); crediting
       // the wallet instead just moves it onto the customer's account, so it is
       // recorded but doesn't reduce the day's cash reconciliation total.
-      let payoutRecord = { tournamentId, place, customerId: winnerId, amount: prize.amount, payType: method === "wallet" ? "wallet" : method, date: new Date().toISOString() };
+      let payoutRecord = { tournamentId, place, customerId: winnerId, amount: prize.amount, payType: (typeof method === "object") ? "combined" : (method === "wallet" ? "wallet" : method), date: new Date().toISOString() };
       let ops = [];
-      if (method === "wallet") {
+      if (method === "wallet" || (typeof method === "object" && method.wallet > 0)) {
         let customer = await DB.get("customers", winnerId);
         if (!customer) { App.toast("مشتری یافت نشد"); return { success: false }; }
-        customer.wallet = (customer.wallet || 0) + prize.amount;
+        let walletAmt = typeof method === "object" ? (method.wallet || 0) : prize.amount;
+        customer.wallet = (customer.wallet || 0) + walletAmt;
         ops.push({ store: "customers", type: "put", data: customer });
+      } else if (typeof method === "object") {
+        // For combined, use computePaymentUpdate
+        let customer = await DB.get("customers", winnerId);
+        if (!customer) { App.toast("مشتری یافت نشد"); return { success: false }; }
+        let payResult = Utils.computePaymentUpdate(customer, prize.amount, method);
+        if (!payResult.success) { App.toast("پرداخت ناموفق بود"); return { success: false }; }
+        ops.push({ store: "customers", type: "put", data: payResult.customer });
+        payoutRecord.payType = payResult.payType;
       }
       ops.push({ store: "prizePayouts", type: "add", data: payoutRecord });
 
@@ -1567,6 +1628,34 @@ const Tournaments = (function () {
     if (el && el.classList.contains("active")) render(el);
   }
 
+  function toggleCombinedPayment(selectId, fieldsId, total) {
+    let payType = document.getElementById(selectId).value;
+    let fields = document.getElementById(fieldsId);
+    if (fields) fields.style.display = payType === "combined" ? "block" : "none";
+    if (payType === "combined") updateCombinedCheckTotal(fieldsId, total);
+  }
+
+  function updateCombinedCheck(cardId, cashId, checkId, total) {
+    let card = parseInt(document.getElementById(cardId).value) || 0;
+    let cash = parseInt(document.getElementById(cashId).value) || 0;
+    let sum = card + cash;
+    let el = document.getElementById(checkId);
+    if (!el) return;
+    el.textContent = sum === total ? "✓ مطابقت دارد" : `⚠ جمع: ${Utils.formatCurrency(sum)} (کل: ${Utils.formatCurrency(total)})`;
+    el.style.color = sum === total ? "green" : "red";
+  }
+
+  function updateCombinedCheckTotal(fieldsId, total) {
+    let card = parseInt(document.getElementById(fieldsId).querySelector('[id$="CombinedCardAmount"]').value) || 0;
+    let cash = parseInt(document.getElementById(fieldsId).querySelector('[id$="CombinedCashAmount"]').value) || 0;
+    let sum = card + cash;
+    let checkEl = document.getElementById(fieldsId).querySelector('[id$="CombinedCheck"]');
+    if (checkEl) {
+      checkEl.textContent = sum === total ? "✓ مطابقت دارد" : `⚠ جمع: ${Utils.formatCurrency(sum)} (کل: ${Utils.formatCurrency(total)})`;
+      checkEl.style.color = sum === total ? "green" : "red";
+    }
+  }
+
   return {
     render,
     showCreateTournament,
@@ -1597,5 +1686,7 @@ const Tournaments = (function () {
     payoutPrize,
     confirmPayoutPrize,
     refresh,
+    toggleCombinedPayment,
+    updateCombinedCheck
   };
 })();

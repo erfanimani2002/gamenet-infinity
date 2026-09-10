@@ -365,7 +365,12 @@ const Overnight = (function () {
       <div class="list-row"><span class="row-label">مانده قابل پرداخت</span><span class="row-value amount">${Utils.formatCurrency(totals.remainingBalance)}</span></div>
       <div class="form-group"><label>مبلغ پرداخت</label><input type="number" id="payAmount" value="${totals.remainingBalance}" min="1" max="${totals.remainingBalance}"></div>
       <div class="form-group"><label>روش پرداخت</label>
-        <select id="payMethod"><option value="cash">نقدی</option><option value="card">کارتی</option><option value="wallet">کیف‌پول</option><option value="debt">بدهکاری</option></select>
+        <select id="payMethod" onchange="Overnight.toggleCombinedPayment('payMethod', 'payCombinedFields', ${totals.remainingBalance})"><option value="cash">نقدی</option><option value="card">کارتی</option><option value="wallet">کیف‌پول</option><option value="debt">بدهکاری</option><option value="combined">ترکیبی (نقدی + کارتی)</option></select>
+      </div>
+      <div id="payCombinedFields" style="display:none; margin-top:8px;">
+        <div class="form-group"><label>مبلغ کارتی</label><input type="number" id="payCombinedCardAmount" min="0" oninput="Overnight.updateCombinedCheck('payCombinedCardAmount', 'payCombinedCashAmount', 'payCombinedCheck', ${totals.remainingBalance})"></div>
+        <div class="form-group"><label>مبلغ نقدی</label><input type="number" id="payCombinedCashAmount" min="0" oninput="Overnight.updateCombinedCheck('payCombinedCardAmount', 'payCombinedCashAmount', 'payCombinedCheck', ${totals.remainingBalance})"></div>
+        <div id="payCombinedCheck" class="text-sm" style="margin-top:4px;"></div>
       </div>
       <div class="form-group"><label>ثبت‌کننده</label>${settlerHtml}</div>
       <div class="modal-actions">
@@ -379,6 +384,12 @@ const Overnight = (function () {
     await Utils.guardDoubleClick(async () => {
       let amountInput = parseInt(document.getElementById("payAmount").value) || 0;
       let payType = document.getElementById("payMethod").value;
+      if (payType === "combined") {
+        let cardAmt = parseInt(document.getElementById("payCombinedCardAmount").value) || 0;
+        let cashAmt = parseInt(document.getElementById("payCombinedCashAmount").value) || 0;
+        if (cardAmt + cashAmt !== amountInput) { App.toast("مبلغ‌ها با کل مطابقت ندارد"); return { success: false }; }
+        payType = { card: cardAmt, cash: cashAmt };
+      }
       let settlerName = Utils.getSettlerName();
 
       let reservation = await DB.get("overnightReservations", id);
@@ -517,7 +528,12 @@ const Overnight = (function () {
       <div class="list-row"><span class="row-label">قابل استرداد</span><span class="row-value amount">${Utils.formatCurrency(refundable)}</span></div>
       <div class="form-group"><label>مبلغ استرداد</label><input type="number" id="refundAmount" value="${refundable}" min="1" max="${refundable}"></div>
       <div class="form-group"><label>روش استرداد</label>
-        <select id="refundMethod"><option value="cash">نقدی</option><option value="card">کارتی</option><option value="wallet">اعتبار کیف‌پول</option><option value="debt">بخشش بدهی</option></select>
+        <select id="refundMethod" onchange="Overnight.toggleCombinedPayment('refundMethod', 'refundCombinedFields', ${refundable})"><option value="cash">نقدی</option><option value="card">کارتی</option><option value="wallet">اعتبار کیف‌پول</option><option value="debt">بخشش بدهی</option><option value="combined">ترکیبی (نقدی + کارتی)</option></select>
+      </div>
+      <div id="refundCombinedFields" style="display:none; margin-top:8px;">
+        <div class="form-group"><label>مبلغ کارتی</label><input type="number" id="refundCombinedCardAmount" min="0" oninput="Overnight.updateCombinedCheck('refundCombinedCardAmount', 'refundCombinedCashAmount', 'refundCombinedCheck', ${refundable})"></div>
+        <div class="form-group"><label>مبلغ نقدی</label><input type="number" id="refundCombinedCashAmount" min="0" oninput="Overnight.updateCombinedCheck('refundCombinedCardAmount', 'refundCombinedCashAmount', 'refundCombinedCheck', ${refundable})"></div>
+        <div id="refundCombinedCheck" class="text-sm" style="margin-top:4px;"></div>
       </div>
       <div class="modal-actions">
         <button class="btn btn-danger" onclick="Overnight.refundReservation(${id})">تایید استرداد</button>
@@ -537,6 +553,12 @@ const Overnight = (function () {
 
       let amountInput = parseInt(document.getElementById("refundAmount").value) || 0;
       let method = document.getElementById("refundMethod").value;
+      if (method === "combined") {
+        let cardAmt = parseInt(document.getElementById("refundCombinedCardAmount").value) || 0;
+        let cashAmt = parseInt(document.getElementById("refundCombinedCashAmount").value) || 0;
+        if (cardAmt + cashAmt !== amountInput) { App.toast("مبلغ‌ها با کل مطابقت ندارد"); return { success: false }; }
+        method = { card: cardAmt, cash: cashAmt };
+      }
       // Capped server-side, so a duplicate submit or a stale max= can never
       // refund more than was actually collected.
       let amount = Math.min(amountInput, refundable);
@@ -545,14 +567,14 @@ const Overnight = (function () {
       let customer = await DB.get("customers", reservation.customerId);
       if (!customer) { App.toast("مشتری یافت نشد"); return { success: false }; }
       let updated = { ...customer };
-      if (method === "wallet") {
-        updated.wallet = (updated.wallet || 0) + amount;
-        // The original wallet payment increased totalPaid; the refund credits
-        // the wallet but the money hasn't actually left the till, so reverse
-        // the totalPaid increase to keep lifetime spending accurate.
+      if (method === "wallet" || (typeof method === "object" && method.wallet > 0)) {
+        updated.wallet = (updated.wallet || 0) + (typeof method === "object" ? (method.wallet || 0) : amount);
+        updated.totalPaid = Math.max(0, (updated.totalPaid || 0) - (typeof method === "object" ? (method.wallet || 0) : amount));
+      } else if (method === "debt" || (typeof method === "object" && method.debt > 0)) {
+        updated.debt = Math.max(0, (updated.debt || 0) - (typeof method === "object" ? (method.debt || 0) : amount));
+      } else if (typeof method === "object") {
+        // Combined payment - reverse each leg
         updated.totalPaid = Math.max(0, (updated.totalPaid || 0) - amount);
-      } else if (method === "debt") {
-        updated.debt = Math.max(0, (updated.debt || 0) - amount); // forgiving debt incurred at payment time
       } else {
         updated.totalPaid = Math.max(0, (updated.totalPaid || 0) - amount); // cash/card actually leaving the till
       }
@@ -600,6 +622,34 @@ const Overnight = (function () {
     });
   }
 
+  function toggleCombinedPayment(selectId, fieldsId, total) {
+    let payType = document.getElementById(selectId).value;
+    let fields = document.getElementById(fieldsId);
+    if (fields) fields.style.display = payType === "combined" ? "block" : "none";
+    if (payType === "combined") updateCombinedCheckTotal(fieldsId, total);
+  }
+
+  function updateCombinedCheck(cardId, cashId, checkId, total) {
+    let card = parseInt(document.getElementById(cardId).value) || 0;
+    let cash = parseInt(document.getElementById(cashId).value) || 0;
+    let sum = card + cash;
+    let el = document.getElementById(checkId);
+    if (!el) return;
+    el.textContent = sum === total ? "✓ مطابقت دارد" : `⚠ جمع: ${Utils.formatCurrency(sum)} (کل: ${Utils.formatCurrency(total)})`;
+    el.style.color = sum === total ? "green" : "red";
+  }
+
+  function updateCombinedCheckTotal(fieldsId, total) {
+    let card = parseInt(document.getElementById(fieldsId).querySelector('[id$="CombinedCardAmount"]').value) || 0;
+    let cash = parseInt(document.getElementById(fieldsId).querySelector('[id$="CombinedCashAmount"]').value) || 0;
+    let sum = card + cash;
+    let checkEl = document.getElementById(fieldsId).querySelector('[id$="CombinedCheck"]');
+    if (checkEl) {
+      checkEl.textContent = sum === total ? "✓ مطابقت دارد" : `⚠ جمع: ${Utils.formatCurrency(sum)} (کل: ${Utils.formatCurrency(total)})`;
+      checkEl.style.color = sum === total ? "green" : "red";
+    }
+  }
+
   return {
     render, showAddReservation, createReservation, viewReservation,
     showAddItem, addItemClick, addCustomItem,
@@ -608,5 +658,6 @@ const Overnight = (function () {
     showCancel, cancelReservation,
     showRefund, refundReservation,
     computeTotals, getTransactionsFor, CATEGORIES,
+    toggleCombinedPayment, updateCombinedCheck
   };
 })();

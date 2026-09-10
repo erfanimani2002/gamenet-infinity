@@ -140,7 +140,17 @@ const Utils = (function () {
     if (!customer) return { success: false, reason: "no_customer" };
     let breakdown = { wallet: 0, debt: 0, cash: 0, card: 0 };
     let effective = payType;
-    if (payType === "cash") {
+    if (typeof payType === "object") {
+      let obj = payType;
+      let sum = (obj.wallet || 0) + (obj.debt || 0) + (obj.cash || 0) + (obj.card || 0);
+      if (sum !== amount) return { success: false, reason: "breakdown_sum_mismatch" };
+      breakdown.wallet = obj.wallet || 0;
+      breakdown.debt = obj.debt || 0;
+      breakdown.cash = obj.cash || 0;
+      breakdown.card = obj.card || 0;
+      customer.totalPaid = (customer.totalPaid || 0) + amount;
+      effective = "combined";
+    } else if (payType === "cash") {
       breakdown.cash = amount;
       customer.totalPaid = (customer.totalPaid || 0) + amount;
     } else if (payType === "card") {

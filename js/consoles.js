@@ -331,7 +331,12 @@ const Consoles = (function () {
             <div class="text-muted text-sm mb-2">${dur}</div>
             <div class="form-inline">
               <div class="form-group"><label>پرداخت‌کننده</label>${Utils.renderPayerSelect(customers, blockDefaultPayerId, "payer_" + b.index)}</div>
-              <div class="form-group"><label>روش</label><select id="payType_${b.index}"><option value="wallet">کیف‌پول</option><option value="debt">بدهکاری</option><option value="cash">نقدی</option><option value="card">کارتی</option></select></div>
+              <div class="form-group"><label>روش</label><select id="payType_${b.index}" onchange="Consoles.toggleCombinedPayment('payType_${b.index}', 'combinedFields_${b.index}', ${b.price})"><option value="wallet">کیف‌پول</option><option value="debt">بدهکاری</option><option value="cash">نقدی</option><option value="card">کارتی</option><option value="combined">ترکیبی (نقدی + کارتی)</option></select></div>
+<div id="combinedFields_${b.index}" style="display:none; margin-top:8px;">
+  <div class="form-group"><label>مبلغ کارتی</label><input type="number" id="combinedCardAmount_${b.index}" min="0" oninput="Consoles.updateCombinedCheck('combinedCardAmount_${b.index}', 'combinedCashAmount_${b.index}', 'combinedCheck_${b.index}', ${b.price})"></div>
+  <div class="form-group"><label>مبلغ نقدی</label><input type="number" id="combinedCashAmount_${b.index}" min="0" oninput="Consoles.updateCombinedCheck('combinedCardAmount_${b.index}', 'combinedCashAmount_${b.index}', 'combinedCheck_${b.index}', ${b.price})"></div>
+  <div id="combinedCheck_${b.index}" class="text-sm" style="margin-top:4px;"></div>
+</div>
               <div class="form-group"><label>تسویه‌کننده</label>${settlerHtml.replace('id="settlerSelect"', 'id="settler_' + b.index + '"')}</div>
               <button class="btn btn-sm btn-success" onclick="Consoles.settleSingleBlock(${deviceId}, ${b.index})">تسویه این بلوک</button>
             </div>
@@ -365,6 +370,12 @@ const Consoles = (function () {
 
       let payerId = parseInt(document.getElementById("payer_" + blockIndex).value) || 0;
       let payType = document.getElementById("payType_" + blockIndex).value;
+      if (payType === "combined") {
+        let cardAmt = parseInt(document.getElementById("combinedCardAmount_" + blockIndex).value) || 0;
+        let cashAmt = parseInt(document.getElementById("combinedCashAmount_" + blockIndex).value) || 0;
+        if (cardAmt + cashAmt !== block.price) { App.toast("مبلغ‌ها با کل مطابقت ندارد"); return { success: false }; }
+        payType = { card: cardAmt, cash: cashAmt };
+      }
       let settlerEl = document.getElementById("settler_" + blockIndex);
       let settlerName = settlerEl ? settlerEl.options[settlerEl.selectedIndex]?.text : "";
 
@@ -440,7 +451,12 @@ const Consoles = (function () {
       <hr class="section-divider">
       <div class="form-group"><label>پرداخت‌کننده</label>${Utils.renderPayerSelect(customers, defaultPayerId, "payerId")}</div>
       <div class="form-group"><label>روش پرداخت</label>
-        <select id="settlePayType"><option value="wallet">کیف‌پول</option><option value="debt">بدهکاری</option><option value="cash">نقدی</option><option value="card">کارتی</option></select>
+        <select id="settlePayType" onchange="Consoles.toggleCombinedPayment('settlePayType', 'combinedFieldsSession', ${total - discount})"><option value="wallet">کیف‌پول</option><option value="debt">بدهکاری</option><option value="cash">نقدی</option><option value="card">کارتی</option><option value="combined">ترکیبی (نقدی + کارتی)</option></select>
+      </div>
+      <div id="combinedFieldsSession" style="display:none; margin-top:8px;">
+        <div class="form-group"><label>مبلغ کارتی</label><input type="number" id="combinedCardAmountSession" min="0" oninput="Consoles.updateCombinedCheck('combinedCardAmountSession', 'combinedCashAmountSession', 'combinedCheckSession', ${total - discount})"></div>
+        <div class="form-group"><label>مبلغ نقدی</label><input type="number" id="combinedCashAmountSession" min="0" oninput="Consoles.updateCombinedCheck('combinedCardAmountSession', 'combinedCashAmountSession', 'combinedCheckSession', ${total - discount})"></div>
+        <div id="combinedCheckSession" class="text-sm" style="margin-top:4px;"></div>
       </div>
       <div class="form-group"><label>کاربر تسویه‌کننده</label>${settlerHtml}</div>
       <div class="modal-actions">
@@ -454,6 +470,12 @@ const Consoles = (function () {
     await Utils.guardDoubleClick(async () => {
       let payerId = parseInt(document.getElementById("payerId").value) || 0;
       let payType = document.getElementById("settlePayType").value;
+      if (payType === "combined") {
+        let cardAmt = parseInt(document.getElementById("combinedCardAmountSession").value) || 0;
+        let cashAmt = parseInt(document.getElementById("combinedCashAmountSession").value) || 0;
+        if (cardAmt + cashAmt !== finalAmount) { App.toast("مبلغ‌ها با کل مطابقت ندارد"); return { success: false }; }
+        payType = { card: cardAmt, cash: cashAmt };
+      }
       let settlerName = Utils.getSettlerName();
 
       let sessions = await DB.getAll("sessions");
@@ -762,11 +784,40 @@ const Consoles = (function () {
     if (el && el.classList.contains("active")) render(el);
   }
 
+  function toggleCombinedPayment(selectId, fieldsId, total) {
+    let payType = document.getElementById(selectId).value;
+    let fields = document.getElementById(fieldsId);
+    if (fields) fields.style.display = payType === "combined" ? "block" : "none";
+    if (payType === "combined") updateCombinedCheckTotal(fieldsId, total);
+  }
+
+  function updateCombinedCheck(cardId, cashId, checkId, total) {
+    let card = parseInt(document.getElementById(cardId).value) || 0;
+    let cash = parseInt(document.getElementById(cashId).value) || 0;
+    let sum = card + cash;
+    let el = document.getElementById(checkId);
+    if (!el) return;
+    el.textContent = sum === total ? "✓ مطابقت دارد" : `⚠ جمع: ${Utils.formatCurrency(sum)} (کل: ${Utils.formatCurrency(total)})`;
+    el.style.color = sum === total ? "green" : "red";
+  }
+
+  function updateCombinedCheckTotal(fieldsId, total) {
+    let card = parseInt(document.getElementById(fieldsId).querySelector('[id^="combinedCardAmount"]').value) || 0;
+    let cash = parseInt(document.getElementById(fieldsId).querySelector('[id^="combinedCashAmount"]').value) || 0;
+    let sum = card + cash;
+    let checkEl = document.getElementById(fieldsId).querySelector('[id^="combinedCheck"]');
+    if (checkEl) {
+      checkEl.textContent = sum === total ? "✓ مطابقت دارد" : `⚠ جمع: ${Utils.formatCurrency(sum)} (کل: ${Utils.formatCurrency(total)})`;
+      checkEl.style.color = sum === total ? "green" : "red";
+    }
+  }
+
   return {
     render, startSession, confirmStartSession, openBlock, closeBlock, confirmCloseBlock,
     settleBlock, settleSingleBlock, confirmSettleBlock: settleSingleBlock, settleSession, confirmSettleSession,
     showSessionDetail, showAddItem, addItemClick, transferSession, confirmTransfer,
     cancelSession, quickCreateCustomer,
-    filterCustomers, pickCustomer, removeSelectedId
+    filterCustomers, pickCustomer, removeSelectedId,
+    toggleCombinedPayment, updateCombinedCheck
   };
 })();
