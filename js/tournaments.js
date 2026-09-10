@@ -334,9 +334,12 @@ const Tournaments = (function () {
         <div class="form-group">
           <select id="addParticipantSelect" style="width:100%;">
             <option value="">انتخاب شناسه...</option>
-            ${customers.filter((c) => !participants.includes(c.id)).map((c) => `
-              <option value="${c.id}">#${c.displayId || c.id}</option>
-            `).join("")}
+            ${customers.filter((c) => !participants.includes(c.id)).map((c) => {
+              let fullName = ((c.firstName || "") + " " + (c.lastName || "")).trim();
+              let idLabel = c.displayId || c.id;
+              let label = fullName ? fullName + " #" + idLabel : "#" + idLabel;
+              return `<option value="${c.id}">${label}</option>`;
+            }).join("")}
           </select>
         </div>
         <button class="btn btn-sm btn-outline" onclick="Tournaments.addParticipant(${id})">افزودن شرکت‌کننده</button>
@@ -493,20 +496,24 @@ const Tournaments = (function () {
     return `دور ${round}`;
   }
 
-  // Tournament UI must only ever show a participant's ID number, never their
-  // real name — full names stay visible only inside the customer's own
-  // profile view (Customers.showProfile), matching the same protection used
-  // elsewhere in the app (debts.js, reports.js).
+  // Tournament UI shows participant full name with ID number.
   function getParticipantName(id, customers) {
     if (Array.isArray(id)) {
       return id.map((pid) => {
         let c = customers.find((cu) => cu.id === pid);
-        return c ? '#' + (c.displayId || c.id) : '?';
+        if (!c) return '?';
+        let fullName = ((c.firstName || "") + " " + (c.lastName || "")).trim();
+        let displayNum = c.displayId || c.id;
+        if (fullName) return fullName + " (#" + displayNum + ")";
+        return '#' + displayNum;
       }).join(" & ");
     }
     let c = customers.find((cu) => cu.id === id);
-    if (c) return '#' + (c.displayId || c.id);
-    return id ? '#' + id : 'تعریف نشده';
+    if (!c) return id ? '#' + id : 'تعریف نشده';
+    let fullName = ((c.firstName || "") + " " + (c.lastName || "")).trim();
+    let displayNum = c.displayId || c.id;
+    if (fullName) return fullName + " (#" + displayNum + ")";
+    return '#' + displayNum;
   }
 
   async function addParticipant(tournamentId) {
@@ -956,7 +963,9 @@ const Tournaments = (function () {
         <select id="matchItemAssign">
           ${matchPlayers.map((pid) => {
             let c = customers.find((cu) => cu.id === pid);
-            let label = c ? '#' + (c.displayId || c.id) : '#' + pid;
+            let fullName = c ? ((c.firstName || "") + " " + (c.lastName || "")).trim() : "";
+            let idLabel = c ? (c.displayId || c.id) : pid;
+            let label = fullName ? fullName + " #" + idLabel : "#" + idLabel;
             return `<option value="${pid}">${label}</option>`;
           }).join("")}
         </select>

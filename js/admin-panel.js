@@ -49,6 +49,10 @@ const AdminPanel = (function () {
           </div>
           <div class="form-inline">
             <div class="form-group">
+              <label>پی‌سی (تومان/ساعت)</label>
+              <input type="number" id="pcRate" value="${pricing.pcRate || 3000}" min="0">
+            </div>
+            <div class="form-group">
               <label>ورودی رزرو شب (تومان)</label>
               <input type="number" id="overnightEntranceFee" value="${pricing.overnightEntranceFee != null ? pricing.overnightEntranceFee : 100000}" min="0">
             </div>
@@ -147,6 +151,7 @@ const AdminPanel = (function () {
         2: parseInt(document.getElementById("billiard2").value) || 8000,
         4: parseInt(document.getElementById("billiard4").value) || 12000,
       },
+      pcRate: parseInt(document.getElementById("pcRate").value) || 3000,
       roundingUnit: parseInt(document.getElementById("roundingUnit").value) || 1000,
       overnightEntranceFee: parseInt(document.getElementById("overnightEntranceFee").value) || 0,
     };

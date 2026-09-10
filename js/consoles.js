@@ -42,7 +42,7 @@ const Consoles = (function () {
       if (lastBlock && !lastBlock.endTime) {
         timerHtml = `<span class="inline-timer" id="timer-${device.id}">00:00:00</span>`;
       }
-      let idsHtml = (session.ids || []).map((id) => { let c = customers.find((cu) => cu.id === id); return "#" + (c ? (c.displayId || c.id) : id); }).join(", ") || "?";
+      let idsHtml = (session.ids || []).map((id) => Utils.renderCustomerId(id, customers)).join(", ") || "?";
 
       return `
         <div class="device-item is-busy">
@@ -110,17 +110,21 @@ const Consoles = (function () {
 
   async function renderStartSessionModal(deviceId) {
     let customers = await DB.getAll("customers");
+    let settlerHtml = await Utils.renderSettlerSelect();
     App.openModal(`
       <h2>شروع سشن کنسول</h2>
       <div class="form-group">
         <label>انتخاب شناسه مشتری</label>
         <input type="text" id="sSearch" placeholder="جستجو..." oninput="Consoles.filterCustomers()">
         <div id="sCustomerList" style="max-height:200px;overflow-y:auto;margin-top:8px;">
-          ${customers.map((c) => `
-            <div class="list-row customer-pick" data-id="${c.id}" data-search="${String(c.displayId || c.id)}" onclick="Consoles.pickCustomer(${c.id})" style="cursor:pointer">
-              <span class="row-label">#${c.displayId || c.id}</span>
-            </div>
-          `).join("")}
+          ${customers.map((c) => {
+            let fullName = ((c.firstName || "") + " " + (c.lastName || "")).trim();
+            let idLabel = "#" + (c.displayId || c.id);
+            let searchLabel = idLabel + (fullName ? " " + fullName : "");
+            return `<div class="list-row customer-pick" data-id="${c.id}" data-search="${searchLabel}" onclick="Consoles.pickCustomer(${c.id})" style="cursor:pointer">
+              <span class="row-label">${fullName ? fullName + " " + idLabel : idLabel}</span>
+            </div>`;
+          }).join("")}
         </div>
         <button class="btn btn-sm btn-outline" style="margin-top:6px;" onclick="Consoles.quickCreateCustomer(${deviceId})">+ مشتری جدید سریع</button>
       </div>
@@ -136,6 +140,10 @@ const Consoles = (function () {
           <option value="3">۳ کنترلر</option>
           <option value="4">۴ کنترلر</option>
         </select>
+      </div>
+      <div class="form-group">
+        <label>مسؤول نهایی (اختیاری)</label>
+        ${settlerHtml.replace('id="settlerSelect"', 'id="responsiblePerson"')}
       </div>
       <div class="form-group">
         <label>زمان شروع (اختیاری)</label>
@@ -182,9 +190,8 @@ const Consoles = (function () {
     }
     let customers = await DB.getAll("customers");
     el.innerHTML = selectedIds.map((id) => {
-      let c = customers.find((cu) => cu.id === id);
-      let label = c ? (c.displayId || c.id) : id;
-      return `<span class="status-badge" style="margin:2px;">#${label} <button onclick="Consoles.removeSelectedId(${id})" style="background:none;border:none;cursor:pointer;color:red;">×</button></span>`;
+      let label = Utils.renderCustomerId(id, customers);
+      return `<span class="status-badge" style="margin:2px;">${label} <button onclick="Consoles.removeSelectedId(${id})" style="background:none;border:none;cursor:pointer;color:red;">×</button></span>`;
     }).join("");
   }
 
@@ -210,6 +217,8 @@ const Consoles = (function () {
     let pricing = await DB.getSetting("pricing", {});
     let rates = pricing.consoleRates || { 1: 5000, 2: 7000, 3: 9000, 4: 11000 };
     let rate = rates[controllerCount] || rates[1];
+    let responsibleEl = document.getElementById("responsiblePerson");
+    let responsiblePerson = responsibleEl ? responsibleEl.options[responsibleEl.selectedIndex]?.text : "";
 
     let startTime = new Date();
     let timeInput = document.getElementById("sStartTime").value;
@@ -219,8 +228,9 @@ const Consoles = (function () {
 
     let session = {
       deviceId, deviceType: "console", ids: [...selectedIds], controllerCount,
-      timeBlocks: [{ startTime: startTime.toISOString(), endTime: null, rate, controllerCount, deviceType: "console", price: 0 }],
+      timeBlocks: [{ startTime: startTime.toISOString(), endTime: null, rate, controllerCount, deviceType: "console", deviceId, price: 0 }],
       items: [], status: "active", createdAt: startTime.toISOString(),
+      responsiblePerson,
     };
 
     await DB.add("sessions", session);
@@ -247,7 +257,7 @@ const Consoles = (function () {
     let rates = pricing.consoleRates || {};
     let rate = rates[session.controllerCount] || rates[1];
 
-    session.timeBlocks.push({ startTime: new Date().toISOString(), endTime: null, rate, controllerCount: session.controllerCount, deviceType: session.deviceType || "console", price: 0 });
+    session.timeBlocks.push({ startTime: new Date().toISOString(), endTime: null, rate, controllerCount: session.controllerCount, deviceType: session.deviceType || "console", deviceId: session.deviceId, price: 0 });
     await DB.put("sessions", session);
     await DB.logActivity("شروع بلوک کنسول", "سشن #" + session.id);
     refresh();
@@ -395,6 +405,7 @@ const Consoles = (function () {
     let customers = await DB.getAll("customers");
     let defaultPayerId = (session.ids || [])[0];
     let settlerHtml = await Utils.renderSettlerSelect();
+    let responsibleHtml = await Utils.renderSettlerSelect(session.responsiblePerson ? undefined : undefined);
 
     App.openModal(`
       <h2>تسویه کل سشن</h2>
@@ -408,6 +419,7 @@ const Consoles = (function () {
         <select id="settlePayType"><option value="wallet">کیف‌پول</option><option value="debt">بدهکاری</option><option value="cash">نقدی</option><option value="card">کارتی</option></select>
       </div>
       <div class="form-group"><label>کاربر تسویه‌کننده</label>${settlerHtml}</div>
+      <div class="form-group"><label>مسؤول نهایی (قابل تغییر)</label>${responsibleHtml.replace('id="settlerSelect"', 'id="responsiblePersonSettle"')}</div>
       <div class="modal-actions">
         <button class="btn btn-success" onclick="Consoles.confirmSettleSession(${deviceId})">تسویه</button>
         <button class="btn btn-outline" onclick="App.closeModalForce()">انصراف</button>
@@ -420,6 +432,8 @@ const Consoles = (function () {
       let payerId = parseInt(document.getElementById("payerId").value) || 0;
       let payType = document.getElementById("settlePayType").value;
       let settlerName = Utils.getSettlerName();
+      let responsibleEl = document.getElementById("responsiblePersonSettle");
+      let responsiblePerson = responsibleEl ? responsibleEl.options[responsibleEl.selectedIndex]?.text : "";
 
       let sessions = await DB.getAll("sessions");
       let session = sessions.find((s) => s.deviceId === deviceId && s.status === "active");
@@ -485,6 +499,7 @@ const Consoles = (function () {
       session.settleBreakdown = byDevice;
       session.settlerName = settlerName;
       session.settlePayerId = payerId;
+      session.responsiblePerson = responsiblePerson || session.responsiblePerson || "";
       session.timeBlocks.forEach((b) => { b.settled = true; });
 
       let device = await DB.get("devices", deviceId);
@@ -508,17 +523,17 @@ const Consoles = (function () {
     if (!session) return;
 
     let customers = await DB.getAll("customers");
-    let idsHtml = (session.ids || []).map((id) => {
-      let c = customers.find((cu) => cu.id === id);
-      return "#" + (c ? (c.displayId || c.id) : id);
-    }).join(", ");
+    let devices = await DB.getAll("devices");
+    let idsHtml = (session.ids || []).map((id) => Utils.renderCustomerId(id, customers)).join(", ");
 
     let blocksHtml = (session.timeBlocks || []).map((b, i) => {
       let duration = b.endTime ?
         Utils.formatDuration(new Date(b.endTime) - new Date(b.startTime)) :
         Utils.formatDuration(Date.now() - new Date(b.startTime).getTime()) + " (در حال اجرا)";
+      let blockDevice = b.deviceId ? devices.find((d) => d.id === b.deviceId) : null;
+      let blockDeviceLabel = blockDevice ? " — " + blockDevice.name : "";
       return `<div class="block-item">
-        <span>بلوک ${i + 1}: ${Jalali.timeString(new Date(b.startTime))} - ${b.endTime ? Jalali.timeString(new Date(b.endTime)) : '...'} ${b.settled ? '(تسویه شده)' : ''}</span>
+        <span>بلوک ${i + 1}${blockDeviceLabel}: ${Jalali.timeString(new Date(b.startTime))} - ${b.endTime ? Jalali.timeString(new Date(b.endTime)) : '...'} ${b.settled ? '(تسویه شده)' : ''}</span>
         <span>${duration} | ${Utils.formatCurrency(b.price)}</span>
       </div>`;
     }).join("");
@@ -634,7 +649,7 @@ const Consoles = (function () {
     session.deviceId = targetId;
     session.deviceType = targetDevice.type;
     session.controllerCount = newControllerCount;
-    session.timeBlocks.push({ startTime: new Date().toISOString(), endTime: null, rate: newRate, controllerCount: newControllerCount, deviceType: targetDevice.type, price: 0 });
+    session.timeBlocks.push({ startTime: new Date().toISOString(), endTime: null, rate: newRate, controllerCount: newControllerCount, deviceType: targetDevice.type, deviceId: targetId, price: 0 });
 
     let oldDevice = await DB.get("devices", deviceId);
     await DB.put("sessions", session);

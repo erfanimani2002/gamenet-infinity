@@ -634,23 +634,23 @@ const Reports = (function () {
     let all = [];
     sessions.filter((s) => s.status === "settled" && s.settledAt && Utils.isInRange(s.settledAt, range.start, range.end)).forEach((s) => {
       let device = devices.find((d) => d.id === s.deviceId);
-      let idsText = (s.ids || []).map((id) => { let c = customers.find((cu) => cu.id === id); return "#" + (c ? (c.displayId || c.id) : id); }).join(", ");
+      let idsText = (s.ids || []).map((id) => Utils.renderCustomerId(id, customers)).join(", ");
       all.push({ txType: "session", txId: s.id, type: s.deviceType === "console" ? "کنسول" : s.deviceType === "billiard" ? "بیلیارد" : "پی‌سی", device: device ? device.name : "-", amount: s.settleAmount || 0, payType: s.settlePayType, time: s.settledAt, ids: idsText });
     });
     cafeOrders.filter((o) => Utils.isInRange(o.createdAt, range.start, range.end)).forEach((o) => {
       let c = customers.find((cu) => cu.id === o.customerId);
-      all.push({ txType: "order", txId: o.id, type: "کافی‌شاپ", device: "-", amount: o.total, payType: o.payType, time: o.createdAt, ids: c ? "#" + (c.displayId || c.id) : "-" });
+      all.push({ txType: "order", txId: o.id, type: "کافی‌شاپ", device: "-", amount: o.total, payType: o.payType, time: o.createdAt, ids: c ? Utils.renderCustomerId(o.customerId, customers) : "-" });
     });
     blockPayments.filter((bp) => Utils.isInRange(bp.date, range.start, range.end)).forEach((bp) => {
       let device = devices.find((d) => d.id === bp.deviceId);
       let c = customers.find((cu) => cu.id === bp.customerId);
-      all.push({ txType: "blockPayment", txId: bp.id, type: bp.deviceType === "tournament" ? "تسویه بازی مسابقه" : "تسویه بلوک", device: device ? device.name : "-", amount: bp.amount || 0, payType: bp.payType, time: bp.date, ids: c ? "#" + (c.displayId || c.id) : "-" });
+      all.push({ txType: "blockPayment", txId: bp.id, type: bp.deviceType === "tournament" ? "تسویه بازی مسابقه" : "تسویه بلوک", device: device ? device.name : "-", amount: bp.amount || 0, payType: bp.payType, time: bp.date, ids: c ? Utils.renderCustomerId(bp.customerId, customers) : "-" });
     });
     let overnightTx = await DB.getAll("overnightTransactions");
     overnightTx.filter((t) => (t.type === "payment" || t.type === "refund") && Utils.isInRange(t.timestamp, range.start, range.end) && t.status !== "voided").forEach((t) => {
       let c = customers.find((cu) => cu.id === t.customerId);
       let label = (t.type === "refund" ? "استرداد رزرو شب" : "پرداخت رزرو شب") + " #" + t.reservationId;
-      all.push({ txType: "overnight", txId: t.id, type: label, device: "-", amount: t.type === "refund" ? -t.amount : t.amount, payType: t.payType, time: t.timestamp, ids: c ? "#" + (c.displayId || c.id) : "-" });
+      all.push({ txType: "overnight", txId: t.id, type: label, device: "-", amount: t.type === "refund" ? -t.amount : t.amount, payType: t.payType, time: t.timestamp, ids: c ? Utils.renderCustomerId(t.customerId, customers) : "-" });
     });
 
     all.sort((a, b) => new Date(b.time) - new Date(a.time));
@@ -815,7 +815,7 @@ const Reports = (function () {
         let devices = await DB.getAll("devices");
         let device = devices.find((d) => d.id === s.deviceId);
         let customers = await DB.getAll("customers");
-        let idsText = (s.ids || []).map((id) => { let c = customers.find((cu) => cu.id === id); return "#" + (c ? (c.displayId || c.id) : id); }).join(", ");
+        let idsText = (s.ids || []).map((id) => Utils.renderCustomerId(id, customers)).join(", ");
         t = { type: "session", id: s.id, typeName: s.deviceType === "console" ? "کنسول" : s.deviceType === "billiard" ? "بیلیارد" : "پی‌سی", device: device ? device.name : "-", amount: s.settleAmount || 0, payType: s.settlePayType, payBreakdown: s.payBreakdown, ids: idsText };
       }
     } else if (txType === "blockPayment") {
@@ -825,14 +825,14 @@ const Reports = (function () {
         let device = devices.find((d) => d.id === bp.deviceId);
         let customers = await DB.getAll("customers");
         let c = customers.find((cu) => cu.id === bp.customerId);
-        t = { type: "blockPayment", id: bp.id, typeName: bp.deviceType === "tournament" ? "تسویه بازی مسابقه" : bp.deviceType === "console" ? "تسویه بلوک کنسول" : "تسویه بلوک بیلیارد", device: device ? device.name : "-", amount: bp.amount || 0, payType: bp.payType, payBreakdown: bp.payBreakdown, ids: c ? "#" + (c.displayId || c.id) : "-" };
+        t = { type: "blockPayment", id: bp.id, typeName: bp.deviceType === "tournament" ? "تسویه بازی مسابقه" : bp.deviceType === "console" ? "تسویه بلوک کنسول" : "تسویه بلوک بیلیارد", device: device ? device.name : "-", amount: bp.amount || 0, payType: bp.payType, payBreakdown: bp.payBreakdown, ids: c ? Utils.renderCustomerId(bp.customerId, customers) : "-" };
       }
     } else {
       let o = await DB.get("cafeOrders", txId);
       if (o) {
         let customers = await DB.getAll("customers");
         let c = customers.find((cu) => cu.id === o.customerId);
-        t = { type: "order", id: o.id, typeName: "کافی‌شاپ", device: "-", amount: o.total, payType: o.payType, payBreakdown: o.payBreakdown, ids: c ? "#" + (c.displayId || c.id) : "-" };
+        t = { type: "order", id: o.id, typeName: "کافی‌شاپ", device: "-", amount: o.total, payType: o.payType, payBreakdown: o.payBreakdown, ids: c ? Utils.renderCustomerId(o.customerId, customers) : "-" };
       }
     }
     if (!t) return;
@@ -1148,22 +1148,22 @@ const Reports = (function () {
     let data = [];
     sessions.filter((s) => s.status === "settled" && s.settledAt && Utils.isInRange(s.settledAt, range.start, range.end)).forEach((s) => {
       let device = devices.find((d) => d.id === s.deviceId);
-      let ids = (s.ids || []).map((id) => { let c = customers.find((cu) => cu.id === id); return "#" + (c ? (c.displayId || c.id) : id); }).join(", ");
+      let ids = (s.ids || []).map((id) => Utils.renderCustomerId(id, customers)).join(", ");
       data.push({ "نوع": s.deviceType, "دستگاه": device ? device.name : "", "شناسه‌ها": ids, "مبلغ": s.settleAmount, "روش": s.settlePayType, "تاریخ": Jalali.formatDateTime(s.settledAt), "تسویه‌کننده": s.settlerName || "" });
     });
     cafeOrders.filter((o) => Utils.isInRange(o.createdAt, range.start, range.end)).forEach((o) => {
       let c = customers.find((cu) => cu.id === o.customerId);
       let itemsText = (o.items || []).map((i) => i.name + " x" + i.qty).join("، ");
-      data.push({ "نوع": "کافی‌شاپ", "دستگاه": "-", "شناسه‌ها": c ? "#" + (c.displayId || c.id) : "", "آیتم‌ها": itemsText, "مبلغ": o.total, "روش": o.payType, "تاریخ": Jalali.formatDateTime(o.createdAt), "تسویه‌کننده": "" });
+      data.push({ "نوع": "کافی‌شاپ", "دستگاه": "-", "شناسه‌ها": c ? Utils.renderCustomerId(o.customerId, customers) : "", "آیتم‌ها": itemsText, "مبلغ": o.total, "روش": o.payType, "تاریخ": Jalali.formatDateTime(o.createdAt), "تسویه‌کننده": "" });
     });
     blockPayments.filter((bp) => Utils.isInRange(bp.date, range.start, range.end)).forEach((bp) => {
       let device = devices.find((d) => d.id === bp.deviceId);
       let c = customers.find((cu) => cu.id === bp.customerId);
-      data.push({ "نوع": bp.deviceType === "tournament" ? "تسویه بازی مسابقه" : "تسویه بلوک", "دستگاه": device ? device.name : "", "شناسه‌ها": c ? "#" + (c.displayId || c.id) : "", "مبلغ": bp.amount, "روش": bp.payType, "تاریخ": Jalali.formatDateTime(bp.date), "تسویه‌کننده": bp.settlerName || "" });
+      data.push({ "نوع": bp.deviceType === "tournament" ? "تسویه بازی مسابقه" : "تسویه بلوک", "دستگاه": device ? device.name : "", "شناسه‌ها": c ? Utils.renderCustomerId(bp.customerId, customers) : "", "مبلغ": bp.amount, "روش": bp.payType, "تاریخ": Jalali.formatDateTime(bp.date), "تسویه‌کننده": bp.settlerName || "" });
     });
     overnightTxAll.filter((t) => (t.type === "payment" || t.type === "refund") && Utils.isInRange(t.timestamp, range.start, range.end) && t.status !== "voided").forEach((t) => {
       let c = customers.find((cu) => cu.id === t.customerId);
-      data.push({ "نوع": (t.type === "refund" ? "استرداد رزرو شب" : "پرداخت رزرو شب") + " #" + t.reservationId, "دستگاه": "-", "شناسه‌ها": c ? "#" + (c.displayId || c.id) : "", "مبلغ": t.type === "refund" ? -t.amount : t.amount, "روش": t.payType, "تاریخ": Jalali.formatDateTime(t.timestamp), "تسویه‌کننده": t.settlerName || "" });
+      data.push({ "نوع": (t.type === "refund" ? "استرداد رزرو شب" : "پرداخت رزرو شب") + " #" + t.reservationId, "دستگاه": "-", "شناسه‌ها": c ? Utils.renderCustomerId(t.customerId, customers) : "", "مبلغ": t.type === "refund" ? -t.amount : t.amount, "روش": t.payType, "تاریخ": Jalali.formatDateTime(t.timestamp), "تسویه‌کننده": t.settlerName || "" });
     });
     let ws = XLSX.utils.json_to_sheet(data);
     let wb = XLSX.utils.book_new();
@@ -1175,7 +1175,7 @@ const Reports = (function () {
       let wsOrders = XLSX.utils.json_to_sheet(dailyOrders.map((o) => {
         let c = customers.find((cu) => cu.id === o.customerId);
         return {
-          "شناسه": c ? "#" + (c.displayId || c.id) : "",
+          "شناسه": c ? Utils.renderCustomerId(o.customerId, customers) : "",
           "آیتم‌ها": (o.items || []).map((i) => i.name + " x" + i.qty).join("، "),
           "جمع": o.total,
           "روش پرداخت": o.payType,
@@ -1191,7 +1191,7 @@ const Reports = (function () {
       let wsCharges = XLSX.utils.json_to_sheet(dailyCharges.map((ch) => {
         let c = customers.find((cu) => cu.id === ch.customerId);
         return {
-          "شناسه": c ? "#" + (c.displayId || c.id) : "",
+          "شناسه": c ? Utils.renderCustomerId(ch.customerId, customers) : "",
           "مبلغ": ch.amount,
           "روش": ch.paymentType === "cash" ? "نقدی" : "کارتی",
           "تاریخ": Jalali.formatDateTime(ch.date),
@@ -1231,7 +1231,7 @@ const Reports = (function () {
         let t = tournaments.find((tt) => tt.matches && tt.matches.includes(bp.matchId));
         return {
           "مسابقه": t ? t.name : "",
-          "شناسه پرداخت‌کننده": c ? "#" + (c.displayId || c.id) : "",
+          "شناسه پرداخت‌کننده": c ? Utils.renderCustomerId(bp.customerId, customers) : "",
           "مبلغ": bp.amount,
           "روش": bp.payType,
           "تاریخ": Jalali.formatDateTime(bp.date),
@@ -1252,7 +1252,7 @@ const Reports = (function () {
         let cb = t.categoryBreakdown || {};
         return {
           "رزرو": "#" + t.reservationId,
-          "شناسه مشتری": c ? "#" + (c.displayId || c.id) : "",
+          "شناسه مشتری": c ? Utils.renderCustomerId(t.customerId, customers) : "",
           "نوع خدمت": r ? (r.type === "console" ? "کنسول" : r.type === "billiard" ? "بیلیارد" : "پی‌سی") : "",
           "نوع تراکنش": t.type === "refund" ? "استرداد" : "پرداخت",
           "مبلغ": t.type === "refund" ? -t.amount : t.amount,
@@ -1301,16 +1301,16 @@ const Reports = (function () {
     let data = [];
     sessions.filter((s) => s.status === "settled" && s.settledAt && Utils.isInRange(s.settledAt, monthStart, monthEnd)).forEach((s) => {
       let device = devices.find((d) => d.id === s.deviceId);
-      let ids = (s.ids || []).map((id) => { let c = customers.find((cu) => cu.id === id); return "#" + (c ? (c.displayId || c.id) : id); }).join(", ");
+      let ids = (s.ids || []).map((id) => Utils.renderCustomerId(id, customers)).join(", ");
       data.push({ "نوع": s.deviceType, "دستگاه": device ? device.name : "", "شناسه‌ها": ids, "مبلغ": s.settleAmount, "روش": s.settlePayType, "تاریخ": Jalali.formatDateTime(s.settledAt) });
     });
     cafeOrders.filter((o) => Utils.isInRange(o.createdAt, monthStart, monthEnd)).forEach((o) => {
       let c = customers.find((cu) => cu.id === o.customerId);
-      data.push({ "نوع": "کافی‌شاپ", "شناسه": c ? "#" + (c.displayId || c.id) : "", "آیتم‌ها": (o.items || []).map((i) => i.name + " x" + i.qty).join("، "), "مبلغ": o.total, "روش": o.payType, "تاریخ": Jalali.formatDateTime(o.createdAt) });
+      data.push({ "نوع": "کافی‌شاپ", "شناسه": c ? Utils.renderCustomerId(o.customerId, customers) : "", "آیتم‌ها": (o.items || []).map((i) => i.name + " x" + i.qty).join("، "), "مبلغ": o.total, "روش": o.payType, "تاریخ": Jalali.formatDateTime(o.createdAt) });
     });
     blockPayments.filter((bp) => Utils.isInRange(bp.date, monthStart, monthEnd)).forEach((bp) => {
       let c = customers.find((cu) => cu.id === bp.customerId);
-      data.push({ "نوع": bp.deviceType === "tournament" ? "تسویه بازی مسابقه" : "تسویه بلوک", "شناسه": c ? "#" + (c.displayId || c.id) : "", "مبلغ": bp.amount, "روش": bp.payType, "تاریخ": Jalali.formatDateTime(bp.date) });
+      data.push({ "نوع": bp.deviceType === "tournament" ? "تسویه بازی مسابقه" : "تسویه بلوک", "شناسه": c ? Utils.renderCustomerId(bp.customerId, customers) : "", "مبلغ": bp.amount, "روش": bp.payType, "تاریخ": Jalali.formatDateTime(bp.date) });
     });
     let ws = XLSX.utils.json_to_sheet(data);
     let wb = XLSX.utils.book_new();
@@ -1321,7 +1321,7 @@ const Reports = (function () {
     if (monthCharges.length) {
       let wsCharges = XLSX.utils.json_to_sheet(monthCharges.map((ch) => {
         let c = customers.find((cu) => cu.id === ch.customerId);
-        return { "شناسه": c ? "#" + (c.displayId || c.id) : "", "مبلغ": ch.amount, "روش": ch.paymentType === "cash" ? "نقدی" : "کارتی", "تاریخ": Jalali.formatDateTime(ch.date) };
+        return { "شناسه": c ? Utils.renderCustomerId(ch.customerId, customers) : "", "مبلغ": ch.amount, "روش": ch.paymentType === "cash" ? "نقدی" : "کارتی", "تاریخ": Jalali.formatDateTime(ch.date) };
       }));
       XLSX.utils.book_append_sheet(wb, wsCharges, "شارژ کیف‌پول");
     }
@@ -1354,7 +1354,7 @@ const Reports = (function () {
       let wsTournament = XLSX.utils.json_to_sheet(monthTournament.map((bp) => {
         let c = customers.find((cu) => cu.id === bp.customerId);
         let t = tournaments.find((tt) => tt.matches && tt.matches.includes(bp.matchId));
-        return { "مسابقه": t ? t.name : "", "شناسه": c ? "#" + (c.displayId || c.id) : "", "مبلغ": bp.amount, "روش": bp.payType, "تاریخ": Jalali.formatDateTime(bp.date) };
+        return { "مسابقه": t ? t.name : "", "شناسه": c ? Utils.renderCustomerId(bp.customerId, customers) : "", "مبلغ": bp.amount, "روش": bp.payType, "تاریخ": Jalali.formatDateTime(bp.date) };
       }));
       XLSX.utils.book_append_sheet(wb, wsTournament, "تسویه مسابقات");
     }

@@ -231,6 +231,15 @@ const Utils = (function () {
     return c ? "#" + (c.displayId || c.id) : "#" + id;
   }
 
+  function renderCustomerId(customerId, customers) {
+    let c = customers.find((cu) => cu.id === customerId);
+    if (!c) return "#" + customerId;
+    let fullName = ((c.firstName || "") + " " + (c.lastName || "")).trim();
+    let displayNum = c.displayId || c.id;
+    if (fullName) return fullName + " (#" + displayNum + ")";
+    return "#" + displayNum;
+  }
+
   // Given a destination device type and a controller/cue count carried over
   // from the device a session is being transferred *from*, resolves the rate
   // + a valid count for the destination. The incoming count may have no
@@ -261,7 +270,9 @@ const Utils = (function () {
       : (customers[0] && customers[0].id);
     let options = customers.map((c) => {
       let idLabel = String(c.displayId || c.id);
-      return `<option value="${c.id}" ${c.id === selected ? 'selected' : ''} data-search="${idLabel}">#${idLabel}</option>`;
+      let fullName = ((c.firstName || "") + " " + (c.lastName || "")).trim();
+      let label = fullName ? fullName + " (#" + idLabel + ")" : "#" + idLabel;
+      return `<option value="${c.id}" ${c.id === selected ? 'selected' : ''} data-search="${idLabel}">${label}</option>`;
     }).join("");
     return `
       <input type="text" placeholder="جستجوی شناسه..." style="width:100%;margin-bottom:4px;padding:6px 8px;border:1px solid var(--border);border-radius:var(--radius-sm);font-size:12px;box-sizing:border-box;" oninput="Utils.filterPayerSelect(this)">
@@ -320,7 +331,7 @@ const Utils = (function () {
     formatCurrency, formatCurrencyShort, calculateTimeBlocksPrice,
     calculateSessionDuration, formatDuration, formatTimerDisplay,
     isInRange, escapeHtml, renderSelectLabel,
-    applyPayment, computePaymentUpdate, guardDoubleClick, getSettlerOptions, renderSettlerSelect, getSettlerName, getCustomerDisplayId,
+    applyPayment, computePaymentUpdate, guardDoubleClick, getSettlerOptions, renderSettlerSelect, getSettlerName, getCustomerDisplayId, renderCustomerId,
     getJalaliWeekday, resolveTransferRate, renderPayerSelect, filterPayerSelect,
     getEffectiveDiscount,
   };

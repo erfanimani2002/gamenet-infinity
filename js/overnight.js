@@ -129,7 +129,7 @@ const Overnight = (function () {
       return `
         <div class="list-row">
           <span class="row-value">#${r.id}</span>
-          <span class="row-value">${customer ? "#" + (customer.displayId || customer.id) : "—"}</span>
+          <span class="row-value">${customer ? Utils.renderCustomerId(r.customerId, customers) : "—"}</span>
           <span class="row-value">${typeLabel(r.type)}</span>
           <span class="status-badge ${statusClass}">${statusLabel(r.status)}</span>
           <span class="row-value">ورودی: ${Utils.formatCurrency(totals.charges.entrance)}</span>
@@ -253,7 +253,7 @@ const Overnight = (function () {
     let canRefund = r.status === "cancelled" && (totals.totalPayments - totals.totalRefunds) > 0;
 
     App.openModal(`
-      <h2>رزرو #${r.id} — ${customer ? "#" + (customer.displayId || customer.id) : "—"}</h2>
+      <h2>رزرو #${r.id} — ${customer ? Utils.renderCustomerId(r.customerId, customers) : "—"}</h2>
       <div class="list-row"><span class="row-label">نوع</span><span class="row-value">${typeLabel(r.type)}</span></div>
       <div class="list-row"><span class="row-label">وضعیت</span><span class="row-value">${statusLabel(r.status)}</span></div>
       <div class="list-row"><span class="row-label">ورود</span><span class="row-value">${Jalali.formatDateTime(new Date(r.checkIn))}</span></div>

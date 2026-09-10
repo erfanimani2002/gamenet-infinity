@@ -36,7 +36,7 @@ const Billiard = (function () {
     if (session) {
       let lastBlock = session.timeBlocks && session.timeBlocks[session.timeBlocks.length - 1];
       let timerHtml = lastBlock && !lastBlock.endTime ? `<span class="inline-timer" id="timer-billiard-${device.id}">00:00:00</span>` : "";
-      let idsHtml = (session.ids || []).map((id) => { let c = customers.find((cu) => cu.id === id); return "#" + (c ? (c.displayId || c.id) : id); }).join(", ") || "?";
+      let idsHtml = (session.ids || []).map((id) => Utils.renderCustomerId(id, customers)).join(", ") || "?";
       let stickText = session.controllerCount === 4 ? "چهارچوب" : "دوچوب";
 
       return `
@@ -95,18 +95,25 @@ const Billiard = (function () {
 
   async function renderStartSessionModal(deviceId) {
     let customers = await DB.getAll("customers");
+    let settlerHtml = await Utils.renderSettlerSelect();
     App.openModal(`
       <h2>شروع سشن بیلیارد</h2>
       <div class="form-group">
         <label>انتخاب شناسه</label>
         <input type="text" id="bSearch" placeholder="جستجو..." oninput="Billiard.filterCustomers()">
         <div style="max-height:200px;overflow-y:auto;margin-top:8px;">
-          ${customers.map((c) => `<div class="list-row customer-pick" data-search="${String(c.displayId || c.id)}" onclick="Billiard.pickCustomer(${c.id})" style="cursor:pointer"><span class="row-label">#${c.displayId || c.id}</span></div>`).join("")}
+          ${customers.map((c) => {
+            let fullName = ((c.firstName || "") + " " + (c.lastName || "")).trim();
+            let idLabel = "#" + (c.displayId || c.id);
+            let searchLabel = idLabel + (fullName ? " " + fullName : "");
+            return `<div class="list-row customer-pick" data-search="${searchLabel}" onclick="Billiard.pickCustomer(${c.id})" style="cursor:pointer"><span class="row-label">${fullName ? fullName + " " + idLabel : idLabel}</span></div>`;
+          }).join("")}
         </div>
         <button class="btn btn-sm btn-outline" style="margin-top:6px;" onclick="Billiard.quickCreateCustomer(${deviceId})">+ مشتری جدید سریع</button>
       </div>
       <div class="form-group"><label>انتخاب شده</label><div id="bSelectedIds" class="text-muted text-sm">هیچ شناسه‌ای</div></div>
       <div class="form-group"><label>تعداد چوب</label><select id="bStickCount"><option value="2">دوچوب</option><option value="4">چهارچوب</option></select></div>
+      <div class="form-group"><label>مسؤول نهایی (اختیاری)</label>${settlerHtml.replace('id="settlerSelect"', 'id="responsiblePerson"')}</div>
       <div class="form-group"><label>زمان شروع (اختیاری)</label><input type="time" id="bStartTime"></div>
       <div class="modal-actions">
         <button class="btn btn-primary" onclick="Billiard.confirmStartSession(${deviceId})">شروع</button>
@@ -126,7 +133,7 @@ const Billiard = (function () {
   function filterCustomers() { let q = document.getElementById("bSearch").value.toLowerCase(); document.querySelectorAll(".customer-pick").forEach((r) => { r.style.display = r.dataset.search.includes(q) ? "flex" : "none"; }); }
   function pickCustomer(id) { if (!selectedIds.includes(id)) selectedIds.push(id); updateSelectedIds(); }
   function removeSelectedId(id) { selectedIds = selectedIds.filter((i) => i !== id); updateSelectedIds(); }
-  async function updateSelectedIds() { let el = document.getElementById("bSelectedIds"); if (!el) return; if (selectedIds.length === 0) { el.innerHTML = '<span class="text-muted">هیچ شناسه‌ای</span>'; return; } let customers = await DB.getAll("customers"); el.innerHTML = selectedIds.map((id) => { let c = customers.find((cu) => cu.id === id); let label = c ? (c.displayId || c.id) : id; return `<span class="status-badge" style="margin:2px;">#${label} <button onclick="Billiard.removeSelectedId(${id})" style="background:none;border:none;cursor:pointer;color:red;">×</button></span>`; }).join(""); }
+  async function updateSelectedIds() { let el = document.getElementById("bSelectedIds"); if (!el) return; if (selectedIds.length === 0) { el.innerHTML = '<span class="text-muted">هیچ شناسه‌ای</span>'; return; } let customers = await DB.getAll("customers"); el.innerHTML = selectedIds.map((id) => { let label = Utils.renderCustomerId(id, customers); return `<span class="status-badge" style="margin:2px;">${label} <button onclick="Billiard.removeSelectedId(${id})" style="background:none;border:none;cursor:pointer;color:red;">×</button></span>`; }).join(""); }
 
   function parseTimeInput(timeInput) {
     let now = new Date();
@@ -149,11 +156,13 @@ const Billiard = (function () {
     let stickCount = parseInt(document.getElementById("bStickCount").value);
     let pricing = await DB.getSetting("pricing", {});
     let rate = (pricing.billiardRates || {})[stickCount] || 8000;
+    let responsibleEl = document.getElementById("responsiblePerson");
+    let responsiblePerson = responsibleEl ? responsibleEl.options[responsibleEl.selectedIndex]?.text : "";
     let startTime = new Date();
     let timeInput = document.getElementById("bStartTime").value;
     if (timeInput) { startTime = parseTimeInput(timeInput); }
 
-    let session = { deviceId, deviceType: "billiard", ids: [...selectedIds], controllerCount: stickCount, timeBlocks: [{ startTime: startTime.toISOString(), endTime: null, rate, controllerCount: stickCount, deviceType: "billiard", price: 0 }], items: [], status: "active", createdAt: startTime.toISOString() };
+    let session = { deviceId, deviceType: "billiard", ids: [...selectedIds], controllerCount: stickCount, timeBlocks: [{ startTime: startTime.toISOString(), endTime: null, rate, controllerCount: stickCount, deviceType: "billiard", deviceId, price: 0 }], items: [], status: "active", createdAt: startTime.toISOString(), responsiblePerson };
     await DB.add("sessions", session);
     await DB.put("devices", { ...await DB.get("devices", deviceId), status: "busy" });
     await DB.logActivity("شروع سشن بیلیارد", "میز #" + deviceId + " | " + (stickCount === 4 ? "چهارچوب" : "دوچوب") + " | " + selectedIds.map((i) => "#" + i).join(", "));
@@ -172,7 +181,7 @@ const Billiard = (function () {
 
     let pricing = await DB.getSetting("pricing", {});
     let rate = (pricing.billiardRates || {})[session.controllerCount] || 8000;
-    session.timeBlocks.push({ startTime: new Date().toISOString(), endTime: null, rate, controllerCount: session.controllerCount, deviceType: session.deviceType || "billiard", price: 0 });
+    session.timeBlocks.push({ startTime: new Date().toISOString(), endTime: null, rate, controllerCount: session.controllerCount, deviceType: session.deviceType || "billiard", deviceId: session.deviceId, price: 0 });
     await DB.put("sessions", session);
     await DB.logActivity("شروع بلوک بیلیارد", "سشن #" + session.id);
     refresh();
@@ -313,6 +322,7 @@ const Billiard = (function () {
     let customers = await DB.getAll("customers");
     let defaultPayerId = (session.ids || [])[0];
     let settlerHtml = await Utils.renderSettlerSelect();
+    let responsibleHtml = await Utils.renderSettlerSelect();
 
     App.openModal(`
       <h2>تسویه کل سشن بیلیارد</h2>
@@ -323,6 +333,7 @@ const Billiard = (function () {
       <div class="form-group"><label>پرداخت‌کننده</label>${Utils.renderPayerSelect(customers, defaultPayerId, "payerId")}</div>
       <div class="form-group"><label>روش پرداخت</label><select id="settlePayType"><option value="wallet">کیف‌پول</option><option value="debt">بدهکاری</option><option value="cash">نقدی</option><option value="card">کارتی</option></select></div>
       <div class="form-group"><label>تسویه‌کننده</label>${settlerHtml}</div>
+      <div class="form-group"><label>مسؤول نهایی (قابل تغییر)</label>${responsibleHtml.replace('id="settlerSelect"', 'id="responsiblePersonSettle"')}</div>
       <div class="modal-actions">
         <button class="btn btn-success" onclick="Billiard.confirmSettleSession(${deviceId})">تسویه</button>
         <button class="btn btn-outline" onclick="App.closeModalForce()">انصراف</button>
@@ -335,6 +346,8 @@ const Billiard = (function () {
       let payerId = parseInt(document.getElementById("payerId").value) || 0;
       let payType = document.getElementById("settlePayType").value;
       let settlerName = Utils.getSettlerName();
+      let responsibleEl = document.getElementById("responsiblePersonSettle");
+      let responsiblePerson = responsibleEl ? responsibleEl.options[responsibleEl.selectedIndex]?.text : "";
 
       let sessions = await DB.getAll("sessions");
       let session = sessions.find((s) => s.deviceId === deviceId && s.status === "active");
@@ -385,7 +398,7 @@ const Billiard = (function () {
         if (diff !== 0) byDevice[session.deviceType] = (byDevice[session.deviceType] || 0) + diff;
       }
 
-      session.status = "settled"; session.settledAt = new Date().toISOString(); session.settlePayType = payResult.payType; session.payBreakdown = payResult.payBreakdown; session.settleAmount = finalAmount; session.discount = discount || 0; session.settleBreakdown = byDevice; session.settlerName = settlerName; session.settlePayerId = payerId;
+      session.status = "settled"; session.settledAt = new Date().toISOString(); session.settlePayType = payResult.payType; session.payBreakdown = payResult.payBreakdown; session.settleAmount = finalAmount; session.discount = discount || 0; session.settleBreakdown = byDevice; session.settlerName = settlerName; session.settlePayerId = payerId; session.responsiblePerson = responsiblePerson || session.responsiblePerson || "";
       session.timeBlocks.forEach((b) => { b.settled = true; });
 
       let device = await DB.get("devices", deviceId);
@@ -405,10 +418,13 @@ const Billiard = (function () {
     let session = sessions.find((s) => s.deviceId === deviceId && s.status === "active");
     if (!session) return;
     let customers = await DB.getAll("customers");
-    let idsHtml = (session.ids || []).map((id) => { let c = customers.find((cu) => cu.id === id); return "#" + (c ? (c.displayId || c.id) : id); }).join(", ");
+    let devices = await DB.getAll("devices");
+    let idsHtml = (session.ids || []).map((id) => Utils.renderCustomerId(id, customers)).join(", ");
     let blocksHtml = (session.timeBlocks || []).map((b, i) => {
       let dur = b.endTime ? Utils.formatDuration(new Date(b.endTime) - new Date(b.startTime)) : Utils.formatDuration(Date.now() - new Date(b.startTime).getTime()) + " (ادامه)";
-      return `<div class="block-item"><span>بلوک ${i + 1}: ${Jalali.timeString(new Date(b.startTime))} - ${b.endTime ? Jalali.timeString(new Date(b.endTime)) : '...'} ${b.settled ? '(تسویه)' : ''}</span><span>${dur} | ${Utils.formatCurrency(b.price)}</span></div>`;
+      let blockDevice = b.deviceId ? devices.find((d) => d.id === b.deviceId) : null;
+      let blockDeviceLabel = blockDevice ? " — " + blockDevice.name : "";
+      return `<div class="block-item"><span>بلوک ${i + 1}${blockDeviceLabel}: ${Jalali.timeString(new Date(b.startTime))} - ${b.endTime ? Jalali.timeString(new Date(b.endTime)) : '...'} ${b.settled ? '(تسویه)' : ''}</span><span>${dur} | ${Utils.formatCurrency(b.price)}</span></div>`;
     }).join("");
     let itemsHtml = (session.items || []).map((it) => `<div class="block-item"><span>${Utils.escapeHtml(it.name)} x${it.qty}</span><span>${Utils.formatCurrency(it.price * it.qty)}</span></div>`).join("");
     let totalItems = (session.items || []).reduce((s, i) => s + (i.price * i.qty), 0);
@@ -489,7 +505,7 @@ const Billiard = (function () {
     // the destination type (see Utils.resolveTransferRate).
     let { rate: newRate, controllerCount: newControllerCount } = Utils.resolveTransferRate(pricing, targetDevice.type, session.controllerCount);
     session.deviceId = targetId; session.deviceType = targetDevice.type; session.controllerCount = newControllerCount;
-    session.timeBlocks.push({ startTime: new Date().toISOString(), endTime: null, rate: newRate, controllerCount: newControllerCount, deviceType: targetDevice.type, price: 0 });
+    session.timeBlocks.push({ startTime: new Date().toISOString(), endTime: null, rate: newRate, controllerCount: newControllerCount, deviceType: targetDevice.type, deviceId: targetId, price: 0 });
     let oldDevice = await DB.get("devices", deviceId);
     await DB.put("sessions", session);
     await DB.put("devices", { ...oldDevice, status: "free" });

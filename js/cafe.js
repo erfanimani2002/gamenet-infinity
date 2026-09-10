@@ -96,11 +96,14 @@ const Cafe = (function () {
         <label>انتخاب شناسه مشتری</label>
         <input type="text" id="cafeSearch" placeholder="جستجو..." oninput="Cafe.filterCustomers()">
         <div style="max-height:150px;overflow-y:auto;margin-top:8px;">
-          ${customers.map((c) => `
-            <div class="list-row customer-pick" data-search="${String(c.displayId || c.id)}" onclick="Cafe.pickCustomer(${c.id})" style="cursor:pointer">
-              <span class="row-label">#${c.displayId || c.id}</span>
-            </div>
-          `).join("")}
+          ${customers.map((c) => {
+            let fullName = ((c.firstName || "") + " " + (c.lastName || "")).trim();
+            let idLabel = "#" + (c.displayId || c.id);
+            let searchLabel = idLabel + (fullName ? " " + fullName : "");
+            return `<div class="list-row customer-pick" data-search="${searchLabel}" onclick="Cafe.pickCustomer(${c.id})" style="cursor:pointer">
+              <span class="row-label">${fullName ? fullName + " " + idLabel : idLabel}</span>
+            </div>`;
+          }).join("")}
         </div>
         <button class="btn btn-sm btn-outline" style="margin-top:6px;" onclick="Cafe.quickCreateCustomer()">+ مشتری جدید سریع</button>
       </div>
@@ -139,8 +142,8 @@ const Cafe = (function () {
 
   async function pickCustomer(id) {
     selectedCustomerId = id;
-    let c = await DB.get("customers", id);
-    document.getElementById("cafeSelectedId").innerHTML = c ? "#" + (c.displayId || c.id) : "#" + id;
+    let customers = await DB.getAll("customers");
+    document.getElementById("cafeSelectedId").innerHTML = Utils.renderCustomerId(id, customers);
   }
 
   // "مشتری جدید سریع" — same inline create used by the console/billiard/pc
