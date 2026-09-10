@@ -130,10 +130,6 @@ const PCs = (function () {
         <div id="pcSelectedIds" class="text-muted text-sm">انتخاب نشده</div>
       </div>
       <div class="form-group">
-        <label>مسؤول نهایی (اختیاری)</label>
-        ${settlerHtml.replace('id="settlerSelect"', 'id="responsiblePerson"')}
-      </div>
-      <div class="form-group">
         <label>زمان شروع (اختیاری)</label>
         <input type="time" id="pcStartTime">
       </div>
@@ -199,8 +195,6 @@ const PCs = (function () {
 
     let pricing = await DB.getSetting("pricing", {});
     let rate = pricing.pcRate || 3000;
-    let responsibleEl = document.getElementById("responsiblePerson");
-    let responsiblePerson = responsibleEl ? responsibleEl.options[responsibleEl.selectedIndex]?.text : "";
 
     let startTime = new Date();
     let timeInput = document.getElementById("pcStartTime").value;
@@ -212,7 +206,6 @@ const PCs = (function () {
       deviceId, deviceType: "pc", ids: [...selectedIds], controllerCount: 1,
       timeBlocks: [{ startTime: startTime.toISOString(), endTime: null, rate, controllerCount: 1, deviceType: "pc", deviceId, price: 0 }],
       items: [], status: "active", createdAt: startTime.toISOString(),
-      responsiblePerson,
     };
 
     await DB.add("sessions", session);
@@ -250,14 +243,46 @@ const PCs = (function () {
     let lastBlock = session.timeBlocks[session.timeBlocks.length - 1];
     if (!lastBlock || lastBlock.endTime) return;
 
+    let customers = await DB.getAll("customers");
+    let sessionCustomers = (session.ids || []).map((id) => customers.find((c) => c.id === id)).filter(Boolean);
+
+    App.openModal(`
+      <h2>توقف بلوک — چه کسی تسویه می‌کند؟</h2>
+      <p class="text-muted text-sm">شناسه‌ای که انتخاب می‌کنید فقط برای یادآوری ذخیره می‌شود و لزوماً تسویه‌کننده واقعی نیست.</p>
+      <div class="pick-list">
+        ${sessionCustomers.map((c) => {
+          let label = Utils.renderCustomerId(c.id, customers);
+          return `<div class="pick-item" onclick="PCs.confirmCloseBlock(${deviceId}, ${c.id})" style="cursor:pointer"><span class="pick-name">${label}</span></div>`;
+        }).join("")}
+      </div>
+      <div class="modal-actions">
+        <button class="btn btn-outline" onclick="App.closeModalForce()">انصراف</button>
+      </div>
+    `);
+  }
+
+  async function confirmCloseBlock(deviceId, expectedPayerId) {
+    let sessions = await DB.getAll("sessions");
+    let session = sessions.find((s) => s.deviceId === deviceId && s.status === "active");
+    if (!session) return;
+    let lastBlock = session.timeBlocks[session.timeBlocks.length - 1];
+    if (!lastBlock || lastBlock.endTime) return;
+
+    let customers = await DB.getAll("customers");
+    let payer = customers.find((c) => c.id === expectedPayerId);
+    let expectedPayerName = payer ? Utils.renderCustomerId(expectedPayerId, customers) : "";
+
     lastBlock.endTime = new Date().toISOString();
     let hours = (new Date(lastBlock.endTime) - new Date(lastBlock.startTime)) / 3600000;
     let pricing = await DB.getSetting("pricing", {});
     lastBlock.price = Utils.roundPrice(hours * lastBlock.rate, pricing.roundingUnit || 1000);
+    lastBlock.expectedPayerId = expectedPayerId;
+    lastBlock.expectedPayerName = expectedPayerName;
 
     await DB.put("sessions", session);
     await DB.logActivity("توقف بلوک پی‌سی", "سشن #" + session.id + " | مبلغ: " + Utils.formatCurrency(lastBlock.price));
     App.stopTimer("timer-pc-" + deviceId);
+    App.closeModalForce();
     refresh();
   }
 
@@ -377,7 +402,6 @@ const PCs = (function () {
     let customers = await DB.getAll("customers");
     let defaultPayerId = (session.ids || [])[0];
     let settlerHtml = await Utils.renderSettlerSelect();
-    let responsibleHtml = await Utils.renderSettlerSelect();
 
     App.openModal(`
       <h2>تسویه کل سشن پی‌سی</h2>
@@ -391,7 +415,6 @@ const PCs = (function () {
         <select id="settlePayType"><option value="wallet">کیف‌پول</option><option value="debt">بدهکاری</option><option value="cash">نقدی</option><option value="card">کارتی</option></select>
       </div>
       <div class="form-group"><label>کاربر تسویه‌کننده</label>${settlerHtml}</div>
-      <div class="form-group"><label>مسؤول نهایی (قابل تغییر)</label>${responsibleHtml.replace('id="settlerSelect"', 'id="responsiblePersonSettle"')}</div>
       <div class="modal-actions">
         <button class="btn btn-success" onclick="PCs.confirmSettleSession(${deviceId})">تسویه</button>
         <button class="btn btn-outline" onclick="App.closeModalForce()">انصراف</button>
@@ -404,8 +427,6 @@ const PCs = (function () {
       let payerId = parseInt(document.getElementById("payerId").value) || 0;
       let payType = document.getElementById("settlePayType").value;
       let settlerName = Utils.getSettlerName();
-      let responsibleEl = document.getElementById("responsiblePersonSettle");
-      let responsiblePerson = responsibleEl ? responsibleEl.options[responsibleEl.selectedIndex]?.text : "";
 
       let sessions = await DB.getAll("sessions");
       let session = sessions.find((s) => s.deviceId === deviceId && s.status === "active");
@@ -461,7 +482,6 @@ const PCs = (function () {
       session.settleBreakdown = byDevice;
       session.settlerName = settlerName;
       session.settlePayerId = payerId;
-      session.responsiblePerson = responsiblePerson || session.responsiblePerson || "";
       session.timeBlocks.forEach((b) => { b.settled = true; });
 
       let device = await DB.get("devices", deviceId);
@@ -494,9 +514,10 @@ const PCs = (function () {
         Utils.formatDuration(Date.now() - new Date(b.startTime).getTime()) + " (در حال اجرا)";
       let blockDevice = b.deviceId ? devices.find((d) => d.id === b.deviceId) : null;
       let blockDeviceLabel = blockDevice ? " — " + blockDevice.name : "";
+      let expectedPayerLabel = (b.endTime && b.expectedPayerName) ? " | انتظار: " + b.expectedPayerName : "";
       return `<div class="block-item">
         <span>بلوک ${i + 1}${blockDeviceLabel}: ${Jalali.timeString(new Date(b.startTime))} - ${b.endTime ? Jalali.timeString(new Date(b.endTime)) : '...'} ${b.settled ? '(تسویه شده)' : ''}</span>
-        <span>${duration} | ${Utils.formatCurrency(b.price)}</span>
+        <span>${duration} | ${Utils.formatCurrency(b.price)}${expectedPayerLabel}</span>
       </div>`;
     }).join("");
 
@@ -694,7 +715,7 @@ const PCs = (function () {
   }
 
   return {
-    render, turnOn, confirmTurnOn, openBlock, closeBlock,
+    render, turnOn, confirmTurnOn, openBlock, closeBlock, confirmCloseBlock,
     settleBlock, settleSingleBlock, settleSession, confirmSettleSession,
     showSessionDetail, showAddItem, addItemClick, transferSession, confirmTransfer,
     cancelSession, quickCreateCustomer,

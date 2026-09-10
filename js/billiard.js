@@ -113,7 +113,6 @@ const Billiard = (function () {
       </div>
       <div class="form-group"><label>انتخاب شده</label><div id="bSelectedIds" class="text-muted text-sm">هیچ شناسه‌ای</div></div>
       <div class="form-group"><label>تعداد چوب</label><select id="bStickCount"><option value="2">دوچوب</option><option value="4">چهارچوب</option></select></div>
-      <div class="form-group"><label>مسؤول نهایی (اختیاری)</label>${settlerHtml.replace('id="settlerSelect"', 'id="responsiblePerson"')}</div>
       <div class="form-group"><label>زمان شروع (اختیاری)</label><input type="time" id="bStartTime"></div>
       <div class="modal-actions">
         <button class="btn btn-primary" onclick="Billiard.confirmStartSession(${deviceId})">شروع</button>
@@ -156,13 +155,11 @@ const Billiard = (function () {
     let stickCount = parseInt(document.getElementById("bStickCount").value);
     let pricing = await DB.getSetting("pricing", {});
     let rate = (pricing.billiardRates || {})[stickCount] || 8000;
-    let responsibleEl = document.getElementById("responsiblePerson");
-    let responsiblePerson = responsibleEl ? responsibleEl.options[responsibleEl.selectedIndex]?.text : "";
     let startTime = new Date();
     let timeInput = document.getElementById("bStartTime").value;
     if (timeInput) { startTime = parseTimeInput(timeInput); }
 
-    let session = { deviceId, deviceType: "billiard", ids: [...selectedIds], controllerCount: stickCount, timeBlocks: [{ startTime: startTime.toISOString(), endTime: null, rate, controllerCount: stickCount, deviceType: "billiard", deviceId, price: 0 }], items: [], status: "active", createdAt: startTime.toISOString(), responsiblePerson };
+    let session = { deviceId, deviceType: "billiard", ids: [...selectedIds], controllerCount: stickCount, timeBlocks: [{ startTime: startTime.toISOString(), endTime: null, rate, controllerCount: stickCount, deviceType: "billiard", deviceId, price: 0 }], items: [], status: "active", createdAt: startTime.toISOString() };
     await DB.add("sessions", session);
     await DB.put("devices", { ...await DB.get("devices", deviceId), status: "busy" });
     await DB.logActivity("شروع سشن بیلیارد", "میز #" + deviceId + " | " + (stickCount === 4 ? "چهارچوب" : "دوچوب") + " | " + selectedIds.map((i) => "#" + i).join(", "));
@@ -193,13 +190,47 @@ const Billiard = (function () {
     if (!session) return;
     let lastBlock = session.timeBlocks[session.timeBlocks.length - 1];
     if (!lastBlock || lastBlock.endTime) return;
+
+    let customers = await DB.getAll("customers");
+    let sessionCustomers = (session.ids || []).map((id) => customers.find((c) => c.id === id)).filter(Boolean);
+
+    App.openModal(`
+      <h2>توقف بلوک — چه کسی تسویه می‌کند؟</h2>
+      <p class="text-muted text-sm">شناسه‌ای که انتخاب می‌کنید فقط برای یادآوری ذخیره می‌شود و لزوماً تسویه‌کننده واقعی نیست.</p>
+      <div class="pick-list">
+        ${sessionCustomers.map((c) => {
+          let label = Utils.renderCustomerId(c.id, customers);
+          return `<div class="pick-item" onclick="Billiard.confirmCloseBlock(${deviceId}, ${c.id})" style="cursor:pointer"><span class="pick-name">${label}</span></div>`;
+        }).join("")}
+      </div>
+      <div class="modal-actions">
+        <button class="btn btn-outline" onclick="App.closeModalForce()">انصراف</button>
+      </div>
+    `);
+  }
+
+  async function confirmCloseBlock(deviceId, expectedPayerId) {
+    let sessions = await DB.getAll("sessions");
+    let session = sessions.find((s) => s.deviceId === deviceId && s.status === "active");
+    if (!session) return;
+    let lastBlock = session.timeBlocks[session.timeBlocks.length - 1];
+    if (!lastBlock || lastBlock.endTime) return;
+
+    let customers = await DB.getAll("customers");
+    let payer = customers.find((c) => c.id === expectedPayerId);
+    let expectedPayerName = payer ? Utils.renderCustomerId(expectedPayerId, customers) : "";
+
     lastBlock.endTime = new Date().toISOString();
     let hours = (new Date(lastBlock.endTime) - new Date(lastBlock.startTime)) / 3600000;
     let pricing = await DB.getSetting("pricing", {});
     lastBlock.price = Utils.roundPrice(hours * lastBlock.rate, pricing.roundingUnit || 1000);
+    lastBlock.expectedPayerId = expectedPayerId;
+    lastBlock.expectedPayerName = expectedPayerName;
+
     await DB.put("sessions", session);
     await DB.logActivity("توقف بلوک بیلیارد", "سشن #" + session.id + " | مبلغ: " + Utils.formatCurrency(lastBlock.price));
     App.stopTimer("timer-billiard-" + deviceId);
+    App.closeModalForce();
     refresh();
   }
 
@@ -322,7 +353,6 @@ const Billiard = (function () {
     let customers = await DB.getAll("customers");
     let defaultPayerId = (session.ids || [])[0];
     let settlerHtml = await Utils.renderSettlerSelect();
-    let responsibleHtml = await Utils.renderSettlerSelect();
 
     App.openModal(`
       <h2>تسویه کل سشن بیلیارد</h2>
@@ -333,7 +363,6 @@ const Billiard = (function () {
       <div class="form-group"><label>پرداخت‌کننده</label>${Utils.renderPayerSelect(customers, defaultPayerId, "payerId")}</div>
       <div class="form-group"><label>روش پرداخت</label><select id="settlePayType"><option value="wallet">کیف‌پول</option><option value="debt">بدهکاری</option><option value="cash">نقدی</option><option value="card">کارتی</option></select></div>
       <div class="form-group"><label>تسویه‌کننده</label>${settlerHtml}</div>
-      <div class="form-group"><label>مسؤول نهایی (قابل تغییر)</label>${responsibleHtml.replace('id="settlerSelect"', 'id="responsiblePersonSettle"')}</div>
       <div class="modal-actions">
         <button class="btn btn-success" onclick="Billiard.confirmSettleSession(${deviceId})">تسویه</button>
         <button class="btn btn-outline" onclick="App.closeModalForce()">انصراف</button>
@@ -346,8 +375,6 @@ const Billiard = (function () {
       let payerId = parseInt(document.getElementById("payerId").value) || 0;
       let payType = document.getElementById("settlePayType").value;
       let settlerName = Utils.getSettlerName();
-      let responsibleEl = document.getElementById("responsiblePersonSettle");
-      let responsiblePerson = responsibleEl ? responsibleEl.options[responsibleEl.selectedIndex]?.text : "";
 
       let sessions = await DB.getAll("sessions");
       let session = sessions.find((s) => s.deviceId === deviceId && s.status === "active");
@@ -398,7 +425,7 @@ const Billiard = (function () {
         if (diff !== 0) byDevice[session.deviceType] = (byDevice[session.deviceType] || 0) + diff;
       }
 
-      session.status = "settled"; session.settledAt = new Date().toISOString(); session.settlePayType = payResult.payType; session.payBreakdown = payResult.payBreakdown; session.settleAmount = finalAmount; session.discount = discount || 0; session.settleBreakdown = byDevice; session.settlerName = settlerName; session.settlePayerId = payerId; session.responsiblePerson = responsiblePerson || session.responsiblePerson || "";
+      session.status = "settled"; session.settledAt = new Date().toISOString(); session.settlePayType = payResult.payType; session.payBreakdown = payResult.payBreakdown; session.settleAmount = finalAmount; session.discount = discount || 0; session.settleBreakdown = byDevice; session.settlerName = settlerName; session.settlePayerId = payerId;
       session.timeBlocks.forEach((b) => { b.settled = true; });
 
       let device = await DB.get("devices", deviceId);
@@ -424,7 +451,8 @@ const Billiard = (function () {
       let dur = b.endTime ? Utils.formatDuration(new Date(b.endTime) - new Date(b.startTime)) : Utils.formatDuration(Date.now() - new Date(b.startTime).getTime()) + " (ادامه)";
       let blockDevice = b.deviceId ? devices.find((d) => d.id === b.deviceId) : null;
       let blockDeviceLabel = blockDevice ? " — " + blockDevice.name : "";
-      return `<div class="block-item"><span>بلوک ${i + 1}${blockDeviceLabel}: ${Jalali.timeString(new Date(b.startTime))} - ${b.endTime ? Jalali.timeString(new Date(b.endTime)) : '...'} ${b.settled ? '(تسویه)' : ''}</span><span>${dur} | ${Utils.formatCurrency(b.price)}</span></div>`;
+      let expectedPayerLabel = (b.endTime && b.expectedPayerName) ? " | انتظار: " + b.expectedPayerName : "";
+      return `<div class="block-item"><span>بلوک ${i + 1}${blockDeviceLabel}: ${Jalali.timeString(new Date(b.startTime))} - ${b.endTime ? Jalali.timeString(new Date(b.endTime)) : '...'} ${b.settled ? '(تسویه)' : ''}</span><span>${dur} | ${Utils.formatCurrency(b.price)}${expectedPayerLabel}</span></div>`;
     }).join("");
     let itemsHtml = (session.items || []).map((it) => `<div class="block-item"><span>${Utils.escapeHtml(it.name)} x${it.qty}</span><span>${Utils.formatCurrency(it.price * it.qty)}</span></div>`).join("");
     let totalItems = (session.items || []).reduce((s, i) => s + (i.price * i.qty), 0);
@@ -590,5 +618,5 @@ const Billiard = (function () {
 
   function refresh() { let el = document.getElementById("tab-billiard"); if (el && el.classList.contains("active")) render(el); }
 
-  return { render, startSession, confirmStartSession, openBlock, closeBlock, settleBlock, settleSingleBlock, settleSession, confirmSettleSession, showSessionDetail, showAddItem, addItemClick, transferSession, confirmTransfer, cancelSession, quickCreateCustomer, filterCustomers, pickCustomer, removeSelectedId, refresh };
+  return { render, startSession, confirmStartSession, openBlock, closeBlock, confirmCloseBlock, settleBlock, settleSingleBlock, settleSession, confirmSettleSession, showSessionDetail, showAddItem, addItemClick, transferSession, confirmTransfer, cancelSession, quickCreateCustomer, filterCustomers, pickCustomer, removeSelectedId, refresh };
 })();
