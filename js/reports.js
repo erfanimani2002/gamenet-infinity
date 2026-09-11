@@ -300,7 +300,6 @@ const Reports = (function () {
 
         <hr class="section-divider">
         <div class="flex-gap">
-          <button class="btn btn-primary" onclick="Reports.exportDailyExcel()">خروجی اکسل</button>
           <button class="btn btn-outline" onclick="Reports.showFullTransactions()">لیست تراکنش‌ها</button>
         </div>
       </div>
@@ -443,7 +442,6 @@ const Reports = (function () {
           return `<div class="list-row"><span class="row-label">روز ${day} (${weekday})</span>${statusHtml}<span class="row-value">${Utils.formatCurrency(total)}</span></div>`;
         }).join("")}
       </div>
-      <button class="btn btn-primary" onclick="Reports.exportMonthlyExcel()">خروجی اکسل</button>
     `;
   }
 

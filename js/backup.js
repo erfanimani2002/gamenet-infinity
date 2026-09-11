@@ -35,12 +35,6 @@ const Backup = (function () {
           <h2>پشتیبان‌گیری</h2>
         </div>
         <div class="report-section">
-          <h3>خروجی اکسل</h3>
-          <p class="text-muted text-sm mb-2">خروجی اکسل شامل تمام تراکنش‌ها، بدهی‌ها، ایدی‌ها، موجودی و غیره</p>
-          <button class="btn btn-primary" onclick="Backup.exportExcel()">دانلود فایل اکسل</button>
-        </div>
-        <hr class="section-divider">
-        <div class="report-section">
           <h3>پشتیبان کامل (JSON)</h3>
           ${renderAutoBackupStatus()}
           <p class="text-muted text-sm mb-2">فایل JSON شامل تمام داده‌های اپ قابل بازیابی</p>
