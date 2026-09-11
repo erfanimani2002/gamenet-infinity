@@ -159,6 +159,20 @@ const Utils = (function () {
     } else if (payType === "debt") {
       breakdown.debt = amount;
       customer.debt = (customer.debt || 0) + amount;
+    } else if (payType === "split") {
+      let wallet = customer.wallet || 0;
+      if (wallet >= amount) {
+        breakdown.wallet = amount;
+        customer.wallet = wallet - amount;
+        customer.totalPaid = (customer.totalPaid || 0) + amount;
+      } else {
+        breakdown.wallet = wallet;
+        breakdown.debt = amount - wallet;
+        customer.wallet = 0;
+        customer.totalPaid = (customer.totalPaid || 0) + wallet;
+        customer.debt = (customer.debt || 0) + (amount - wallet);
+        effective = "split";
+      }
     } else if (payType === "wallet") {
       let wallet = customer.wallet || 0;
       if (wallet >= amount) {
