@@ -62,19 +62,19 @@ const Tournaments = (function () {
     }
 
     return `
-      <div class="list-row" style="flex-direction:column;align-items:stretch;gap:8px;padding:14px;">
-        <div style="display:flex;align-items:center;gap:10px;">
+      <div class="list-row tournament-card">
+        <div class="tournament-card-header">
           <span class="item-icon">${(typeof Icons !== "undefined" ? Icons.get(info.icon, 20) : "")}</span>
           <span class="font-bold" style="font-size:15px;">${Utils.escapeHtml(t.name)}</span>
           <span class="status-badge" style="background:${st.color}20;color:${st.color};margin-right:auto;">${st.label}</span>
         </div>
-        <div style="display:flex;gap:16px;font-size:12px;color:var(--text-muted);flex-wrap:wrap;">
+        <div class="tournament-card-meta">
           <span>${info.label}${t.billiardFormat ? ' (' + (t.billiardFormat === '2stick' ? 'دوچوب' : 'چهارچوب') + ')' : ''}</span>
           <span>${participants} شرکت‌کننده</span>
           <span>حق ورود: ${Utils.formatCurrency(t.entryFee)}</span>
           <span>${dateStr}</span>
         </div>
-        <div style="display:flex;gap:6px;flex-wrap:wrap;">${actions}</div>
+        <div class="tournament-card-actions">${actions}</div>
       </div>
     `;
   }
@@ -145,10 +145,10 @@ const Tournaments = (function () {
     let el = document.getElementById("tPrizesList");
     if (!el) return;
     el.innerHTML = prizes.map((p, i) => `
-      <div class="list-row" style="gap:8px;">
-        <span style="min-width:60px;font-size:12px;color:var(--text-muted);">رتبه ${i + 1}</span>
-        <input type="text" class="prize-label" value="${Utils.escapeHtml(p.label || '')}" placeholder="عنوان" style="flex:1;padding:6px 8px;border:1px solid var(--border);border-radius:var(--radius-sm);font-size:12px;">
-        <input type="number" class="prize-amount" value="${p.amount || 0}" min="0" placeholder="مبلغ" style="width:120px;padding:6px 8px;border:1px solid var(--border);border-radius:var(--radius-sm);font-size:12px;">
+      <div class="list-row prize-row">
+        <span class="prize-rank">رتبه ${i + 1}</span>
+        <input type="text" class="prize-label" value="${Utils.escapeHtml(p.label || '')}" placeholder="عنوان">
+        <input type="number" class="prize-amount" value="${p.amount || 0}" min="0" placeholder="مبلغ">
         <button class="btn btn-sm btn-danger" onclick="Tournaments.removePrizeRow(${i})">✕</button>
       </div>
     `).join("");

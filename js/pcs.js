@@ -1,5 +1,6 @@
 const PCs = (function () {
   async function render(el) {
+    el.innerHTML = Utils.skeletonDeviceList(6);
     let devices = await DB.getAll("devices");
     let pcs = devices.filter((d) => d.type === "pc");
     let sessions = await DB.getAll("sessions");
@@ -59,11 +60,16 @@ const PCs = (function () {
               `<button class="btn btn-sm btn-warning" onclick="PCs.closeBlock(${device.id})">توقف</button>` :
               `<button class="btn btn-sm btn-success" onclick="PCs.openBlock(${device.id})">شروع بلوک</button>`
             }
-            <button class="btn btn-sm btn-outline" onclick="PCs.settleBlock(${device.id})">تسویه بلوک</button>
             <button class="btn btn-sm btn-primary" onclick="PCs.settleSession(${device.id})">تسویه کل</button>
-            <button class="btn btn-sm btn-outline" onclick="PCs.showAddItem(${device.id})">+ آیتم</button>
-            <button class="btn btn-sm btn-outline" onclick="PCs.transferSession(${device.id})">جابه‌جایی</button>
-            <button class="btn btn-sm btn-danger" onclick="PCs.cancelSession(${device.id})">لغو سشن</button>
+            <div class="device-overflow">
+              <button class="btn btn-sm btn-outline" onclick="App.toggleOverflow(this)" title="بیشتر">⋯</button>
+              <div class="device-overflow-menu">
+                <button class="overflow-item" onclick="PCs.settleBlock(${device.id})">تسویه بلوک</button>
+                <button class="overflow-item" onclick="PCs.showAddItem(${device.id})">+ آیتم</button>
+                <button class="overflow-item" onclick="PCs.transferSession(${device.id})">جابه‌جایی</button>
+                <button class="overflow-item danger" onclick="PCs.cancelSession(${device.id})">لغو سشن</button>
+              </div>
+            </div>
           </div>
         </div>
       `;
@@ -113,17 +119,17 @@ const PCs = (function () {
       <div class="form-group">
         <label>انتخاب شناسه مشتری</label>
         <input type="text" id="pcSearch" placeholder="جستجو..." oninput="PCs.filterCustomers()">
-        <div id="pcCustomerList" style="max-height:200px;overflow-y:auto;margin-top:8px;">
+        <div id="pcCustomerList" class="customer-pick-list">
           ${customers.map((c) => {
             let fullName = ((c.firstName || "") + " " + (c.lastName || "")).trim();
             let idLabel = "#" + (c.displayId || c.id);
             let searchLabel = idLabel + (fullName ? " " + fullName : "");
-            return `<div class="list-row customer-pick" data-id="${c.id}" data-search="${searchLabel}" onclick="PCs.pickCustomer(${c.id})" style="cursor:pointer">
+            return `<div class="list-row customer-pick" data-id="${c.id}" data-search="${searchLabel}" onclick="PCs.pickCustomer(${c.id})">
               <span class="row-label">${fullName ? fullName + " " + idLabel : idLabel}</span>
             </div>`;
           }).join("")}
         </div>
-        <button class="btn btn-sm btn-outline" style="margin-top:6px;" onclick="PCs.quickCreateCustomer(${deviceId})">+ مشتری جدید سریع</button>
+        <button class="btn btn-sm btn-outline btn-quick-create" onclick="PCs.quickCreateCustomer(${deviceId})">+ مشتری جدید سریع</button>
       </div>
       <div class="form-group">
         <label>شناسه انتخاب شده</label>

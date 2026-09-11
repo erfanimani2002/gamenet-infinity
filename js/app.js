@@ -1,6 +1,7 @@
 const App = (function () {
   let activeTab = "consoles";
   let timerIntervals = {};
+  let lastFocusedElement = null;
 
   const SIDEBAR = [
     {
@@ -71,6 +72,27 @@ const App = (function () {
       let menu = document.getElementById("userMenu");
       if (dropdown && menu && !dropdown.contains(e.target) && !menu.contains(e.target)) {
         menu.style.display = "none";
+      }
+    });
+
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape" && document.getElementById("modalOverlay").classList.contains("active")) {
+        closeModalForce();
+        e.preventDefault();
+      }
+    });
+
+    document.getElementById("modalOverlay").addEventListener("keydown", (e) => {
+      if (e.key !== "Tab") return;
+      let modal = document.getElementById("modalContent");
+      let focusable = modal.querySelectorAll('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])');
+      if (focusable.length === 0) return;
+      let first = focusable[0];
+      let last = focusable[focusable.length - 1];
+      if (e.shiftKey) {
+        if (document.activeElement === first) { last.focus(); e.preventDefault(); }
+      } else {
+        if (document.activeElement === last) { first.focus(); e.preventDefault(); }
       }
     });
   }
@@ -185,6 +207,19 @@ const App = (function () {
     menu.style.display = menu.style.display === "none" ? "block" : "none";
   }
 
+  function toggleOverflow(btn) {
+    let menu = btn.nextElementSibling;
+    let wasOpen = menu.classList.contains("open");
+    document.querySelectorAll(".device-overflow-menu.open").forEach(m => m.classList.remove("open"));
+    if (!wasOpen) menu.classList.add("open");
+  }
+
+  document.addEventListener("click", (e) => {
+    if (!e.target.closest(".device-overflow")) {
+      document.querySelectorAll(".device-overflow-menu.open").forEach(m => m.classList.remove("open"));
+    }
+  });
+
   function switchTab(tab) {
     activeTab = tab;
     document.querySelectorAll(".sidebar-item").forEach((b) => {
@@ -201,83 +236,112 @@ const App = (function () {
   }
 
   function refreshTab(tab) {
-    switch (tab) {
-      case "consoles":
-        Consoles.render(document.getElementById("tab-consoles"));
-        break;
-      case "billiard":
-        Billiard.render(document.getElementById("tab-billiard"));
-        break;
-      case "pcs":
-        PCs.render(document.getElementById("tab-pcs"));
-        break;
-      case "cafe":
-        Cafe.render(document.getElementById("tab-cafe"));
-        break;
-      case "customers":
-        Customers.render(document.getElementById("tab-customers"));
-        break;
-      case "customerClub":
-        CustomerClub.render(document.getElementById("tab-customerClub"));
-        break;
-      case "debts":
-        Debts.render(document.getElementById("tab-debts"));
-        break;
-      case "reports":
-        Reports.renderDaily(document.getElementById("tab-reports"));
-        break;
-      case "instantReport":
-        Reports.renderInstant(document.getElementById("tab-instantReport"));
-        break;
-      case "purchases":
-        Purchases.render(document.getElementById("tab-purchases"));
-        break;
-      case "inventory":
-        Inventory.render(document.getElementById("tab-inventory"));
-        break;
-      case "staff":
-        Staff.render(document.getElementById("tab-staff"));
-        break;
-      case "activityLog":
-        ActivityLog.render(document.getElementById("tab-activityLog"));
-        break;
-      case "backup":
-        Backup.render(document.getElementById("tab-backup"));
-        break;
-      case "monthlyReport":
-        if (Auth.isManager()) Reports.renderMonthly(document.getElementById("tab-monthlyReport"));
-        break;
-      case "adminPanel":
-        if (Auth.isManager()) AdminPanel.render(document.getElementById("tab-adminPanel"));
-        break;
-      case "games":
-        Games.render(document.getElementById("tab-games"));
-        break;
-      case "tournaments":
-        Tournaments.render(document.getElementById("tab-tournaments"));
-        break;
-      case "overnight":
-        Overnight.render(document.getElementById("tab-overnight"));
-        break;
+    try {
+      switch (tab) {
+        case "consoles":
+          Consoles.render(document.getElementById("tab-consoles"));
+          break;
+        case "billiard":
+          Billiard.render(document.getElementById("tab-billiard"));
+          break;
+        case "pcs":
+          PCs.render(document.getElementById("tab-pcs"));
+          break;
+        case "cafe":
+          Cafe.render(document.getElementById("tab-cafe"));
+          break;
+        case "customers":
+          Customers.render(document.getElementById("tab-customers"));
+          break;
+        case "customerClub":
+          CustomerClub.render(document.getElementById("tab-customerClub"));
+          break;
+        case "debts":
+          Debts.render(document.getElementById("tab-debts"));
+          break;
+        case "reports":
+          Reports.renderDaily(document.getElementById("tab-reports"));
+          break;
+        case "instantReport":
+          Reports.renderInstant(document.getElementById("tab-instantReport"));
+          break;
+        case "purchases":
+          Purchases.render(document.getElementById("tab-purchases"));
+          break;
+        case "inventory":
+          Inventory.render(document.getElementById("tab-inventory"));
+          break;
+        case "staff":
+          Staff.render(document.getElementById("tab-staff"));
+          break;
+        case "activityLog":
+          ActivityLog.render(document.getElementById("tab-activityLog"));
+          break;
+        case "backup":
+          Backup.render(document.getElementById("tab-backup"));
+          break;
+        case "monthlyReport":
+          if (Auth.isManager()) Reports.renderMonthly(document.getElementById("tab-monthlyReport"));
+          break;
+        case "adminPanel":
+          if (Auth.isManager()) AdminPanel.render(document.getElementById("tab-adminPanel"));
+          break;
+        case "games":
+          Games.render(document.getElementById("tab-games"));
+          break;
+        case "tournaments":
+          Tournaments.render(document.getElementById("tab-tournaments"));
+          break;
+        case "overnight":
+          Overnight.render(document.getElementById("tab-overnight"));
+          break;
+      }
+    } catch (err) {
+      console.error("Error rendering tab:", tab, err);
+      let el = document.getElementById("tab-" + tab);
+      if (el) {
+        el.innerHTML = `
+          <div class="card">
+            <div class="empty-state">
+              <div class="empty-icon" style="color:var(--danger)">⚠</div>
+              <div>خطا در بارگذاری صفحه</div>
+              <div style="font-size:12px;margin-top:8px;color:var(--text-muted)">${Utils.escapeHtml(err.message)}</div>
+              <button class="btn btn-outline" style="margin-top:12px" onclick="App.refreshTab('${tab}')">تلاش مجدد</button>
+            </div>
+          </div>`;
+      }
     }
   }
 
   function openModal(html, className) {
+    lastFocusedElement = document.activeElement;
     let modal = document.getElementById("modalContent");
     modal.className = "modal" + (className ? " " + className : "");
     modal.innerHTML = html;
+    modal.setAttribute("role", "dialog");
+    modal.setAttribute("aria-modal", "true");
     document.getElementById("modalOverlay").classList.add("active");
+    let firstFocusable = modal.querySelector('button, input, select, textarea, [tabindex]:not([tabindex="-1"])');
+    if (firstFocusable) setTimeout(() => firstFocusable.focus(), 50);
   }
 
   function closeModal(e) {
     if (e && e.target !== document.getElementById("modalOverlay")) return;
     document.getElementById("modalOverlay").classList.remove("active");
-    document.getElementById("modalContent").className = "modal";
+    let modal = document.getElementById("modalContent");
+    modal.className = "modal";
+    modal.removeAttribute("role");
+    modal.removeAttribute("aria-modal");
+    if (lastFocusedElement) { lastFocusedElement.focus(); lastFocusedElement = null; }
   }
 
   function closeModalForce() {
     document.getElementById("modalOverlay").classList.remove("active");
-    document.getElementById("modalContent").className = "modal";
+    let modal = document.getElementById("modalContent");
+    modal.className = "modal";
+    modal.removeAttribute("role");
+    modal.removeAttribute("aria-modal");
+    if (lastFocusedElement) { lastFocusedElement.focus(); lastFocusedElement = null; }
   }
 
   function toast(msg) {
@@ -346,7 +410,10 @@ const App = (function () {
   }
 
   function initTheme() {
-    let saved = localStorage.getItem("theme") || "light";
+    let saved = localStorage.getItem("theme");
+    if (!saved) {
+      saved = window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+    }
     applyTheme(saved);
   }
 
@@ -387,6 +454,7 @@ const App = (function () {
     getActiveTab,
     toggleUserMenu,
     toggleTheme,
+    toggleOverflow,
   };
 })();
 

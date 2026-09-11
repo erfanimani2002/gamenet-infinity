@@ -1,5 +1,6 @@
 const Billiard = (function () {
   async function render(el) {
+    el.innerHTML = Utils.skeletonDeviceList(3);
     let devices = await DB.getAll("devices");
     let tables = devices.filter((d) => d.type === "billiard");
     let sessions = await DB.getAll("sessions");
@@ -54,11 +55,16 @@ const Billiard = (function () {
             ${lastBlock && !lastBlock.endTime ?
               `<button class="btn btn-sm btn-warning" onclick="Billiard.closeBlock(${device.id})">توقف</button>` :
               `<button class="btn btn-sm btn-success" onclick="Billiard.openBlock(${device.id})">شروع بلوک</button>`}
-            <button class="btn btn-sm btn-outline" onclick="Billiard.settleBlock(${device.id})">تسویه بلوک</button>
             <button class="btn btn-sm btn-primary" onclick="Billiard.settleSession(${device.id})">تسویه کل</button>
-            <button class="btn btn-sm btn-outline" onclick="Billiard.showAddItem(${device.id})">+ آیتم</button>
-            <button class="btn btn-sm btn-outline" onclick="Billiard.transferSession(${device.id})">جابه‌جایی</button>
-            <button class="btn btn-sm btn-danger" onclick="Billiard.cancelSession(${device.id})">لغو سشن</button>
+            <div class="device-overflow">
+              <button class="btn btn-sm btn-outline" onclick="App.toggleOverflow(this)" title="بیشتر">⋯</button>
+              <div class="device-overflow-menu">
+                <button class="overflow-item" onclick="Billiard.settleBlock(${device.id})">تسویه بلوک</button>
+                <button class="overflow-item" onclick="Billiard.showAddItem(${device.id})">+ آیتم</button>
+                <button class="overflow-item" onclick="Billiard.transferSession(${device.id})">جابه‌جایی</button>
+                <button class="overflow-item danger" onclick="Billiard.cancelSession(${device.id})">لغو سشن</button>
+              </div>
+            </div>
           </div>
         </div>`;
     }
@@ -101,15 +107,15 @@ const Billiard = (function () {
       <div class="form-group">
         <label>انتخاب شناسه</label>
         <input type="text" id="bSearch" placeholder="جستجو..." oninput="Billiard.filterCustomers()">
-        <div style="max-height:200px;overflow-y:auto;margin-top:8px;">
+        <div class="customer-pick-list">
           ${customers.map((c) => {
             let fullName = ((c.firstName || "") + " " + (c.lastName || "")).trim();
             let idLabel = "#" + (c.displayId || c.id);
             let searchLabel = idLabel + (fullName ? " " + fullName : "");
-            return `<div class="list-row customer-pick" data-search="${searchLabel}" onclick="Billiard.pickCustomer(${c.id})" style="cursor:pointer"><span class="row-label">${fullName ? fullName + " " + idLabel : idLabel}</span></div>`;
+            return `<div class="list-row customer-pick" data-search="${searchLabel}" onclick="Billiard.pickCustomer(${c.id})"><span class="row-label">${fullName ? fullName + " " + idLabel : idLabel}</span></div>`;
           }).join("")}
         </div>
-        <button class="btn btn-sm btn-outline" style="margin-top:6px;" onclick="Billiard.quickCreateCustomer(${deviceId})">+ مشتری جدید سریع</button>
+        <button class="btn btn-sm btn-outline btn-quick-create" onclick="Billiard.quickCreateCustomer(${deviceId})">+ مشتری جدید سریع</button>
       </div>
       <div class="form-group"><label>انتخاب شده</label><div id="bSelectedIds" class="text-muted text-sm">هیچ شناسه‌ای</div></div>
       <div class="form-group"><label>تعداد چوب</label><select id="bStickCount"><option value="2">دوچوب</option><option value="4">چهارچوب</option></select></div>

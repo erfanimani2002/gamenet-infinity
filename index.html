@@ -7,6 +7,7 @@
   <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
+  <a href="#mainContent" class="skip-link">رفتن به محتوا</a>
 
   <div id="loginScreen">
     <div class="login-box">
@@ -21,8 +22,8 @@
   </div>
 
   <div id="appScreen">
-    <div class="sidebar" id="sidebar">
-      <nav class="sidebar-menu" id="sidebarMenu"></nav>
+    <aside class="sidebar" id="sidebar" aria-label="منوی اصلی">
+      <nav class="sidebar-menu" id="sidebarMenu" role="navigation" aria-label="ناوبری اصلی"></nav>
       <div class="sidebar-footer">
         <button class="theme-toggle" onclick="App.toggleTheme()" id="themeToggle">
           <span id="themeIcon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2.5v2.5M12 19v2.5M2.5 12H5M19 12h2.5M5 5l1.8 1.8M17.2 17.2 19 19M19 5l-1.8 1.8M6.8 17.2 5 19"/></svg></span>
@@ -41,9 +42,9 @@
           <span>گیمنت اینفینیتی</span>
         </div>
       </div>
-    </div>
+    </aside>
 
-    <div class="main-content">
+    <main class="main-content" id="mainContent" role="main">
       <div id="tab-consoles" class="tab-content active"></div>
       <div id="tab-billiard" class="tab-content"></div>
       <div id="tab-pcs" class="tab-content"></div>
@@ -63,7 +64,7 @@
       <div id="tab-adminPanel" class="tab-content"></div>
       <div id="tab-tournaments" class="tab-content"></div>
       <div id="tab-overnight" class="tab-content"></div>
-    </div>
+    </main>
   </div>
 
   <div id="modalOverlay" class="modal-overlay" onclick="App.closeModal(event)">

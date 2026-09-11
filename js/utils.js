@@ -387,5 +387,43 @@ const Utils = (function () {
     applyPayment, computePaymentUpdate, guardDoubleClick, withLock, getSettlerOptions, renderSettlerSelect, getSettlerName, getCustomerDisplayId, renderCustomerId,
     getJalaliWeekday, resolveTransferRate, renderPayerSelect, filterPayerSelect,
     getEffectiveDiscount,
+    skeletonDeviceList, skeletonCard, debounce,
   };
+
+  function skeletonDeviceList(count) {
+    count = count || 4;
+    let rows = "";
+    for (let i = 0; i < count; i++) {
+      rows += `
+        <div class="skeleton-device-row">
+          <div class="skeleton skeleton-circle"></div>
+          <div style="flex:1">
+            <div class="skeleton skeleton-text" style="width:120px"></div>
+            <div class="skeleton skeleton-text-sm" style="width:80px"></div>
+          </div>
+          <div class="skeleton skeleton-btn"></div>
+          <div class="skeleton skeleton-btn"></div>
+        </div>`;
+    }
+    return `<div class="card"><div class="skeleton-rect" style="height:20px;width:200px;margin-bottom:16px"></div>${rows}</div>`;
+  }
+
+  function skeletonCard(lines) {
+    lines = lines || 3;
+    let content = '<div class="card"><div style="padding:20px">';
+    content += '<div class="skeleton skeleton-text" style="width:160px;height:18px;margin-bottom:16px"></div>';
+    for (let i = 0; i < lines; i++) {
+      content += `<div class="skeleton skeleton-text" style="width:${60 + Math.random() * 30}%"></div>`;
+    }
+    content += '</div></div>';
+    return content;
+  }
+
+  function debounce(fn, delay) {
+    let timer;
+    return function (...args) {
+      clearTimeout(timer);
+      timer = setTimeout(() => fn.apply(this, args), delay);
+    };
+  }
 })();
