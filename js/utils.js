@@ -227,6 +227,33 @@ const Utils = (function () {
     }
   }
 
+  // General-purpose per-key async lock, reusable anywhere two rapid triggers
+  // on the same resource (e.g. two clicks on the same cafe item picker) could
+  // both read a session/stock/staff record before either write lands, letting
+  // the second write silently clobber the first. Unlike guardDoubleClick,
+  // this does not depend on a <button> element being clicked (it also
+  // protects clickable <div>s like .pick-item) and it is keyed per-resource
+  // (e.g. "session-item:pc:12") rather than being one global lock, so
+  // concurrent clicks on two different devices/staff are never blocked by
+  // each other.
+  //
+  // If `key` is already locked, returns { success: false, alreadyLocked: true }
+  // immediately WITHOUT calling fn (the second/racing call is rejected, not
+  // queued — callers should surface this quietly, e.g. a toast, rather than
+  // treating it as an error). Otherwise locks `key`, awaits fn(), always
+  // releases the lock in `finally`, and returns fn()'s result as-is. Errors
+  // thrown by fn propagate to the caller instead of being swallowed.
+  let activeLocks = new Set();
+  async function withLock(key, fn) {
+    if (activeLocks.has(key)) return { success: false, alreadyLocked: true };
+    activeLocks.add(key);
+    try {
+      return await fn();
+    } finally {
+      activeLocks.delete(key);
+    }
+  }
+
   async function getSettlerOptions() {
     let users = await DB.getAll("users");
     let staff = await DB.getAll("staff");
@@ -357,7 +384,7 @@ const Utils = (function () {
     formatCurrency, formatCurrencyShort, calculateTimeBlocksPrice,
     calculateSessionDuration, formatDuration, formatTimerDisplay,
     isInRange, escapeHtml, renderSelectLabel,
-    applyPayment, computePaymentUpdate, guardDoubleClick, getSettlerOptions, renderSettlerSelect, getSettlerName, getCustomerDisplayId, renderCustomerId,
+    applyPayment, computePaymentUpdate, guardDoubleClick, withLock, getSettlerOptions, renderSettlerSelect, getSettlerName, getCustomerDisplayId, renderCustomerId,
     getJalaliWeekday, resolveTransferRate, renderPayerSelect, filterPayerSelect,
     getEffectiveDiscount,
   };

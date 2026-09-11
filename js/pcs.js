@@ -584,33 +584,44 @@ const PCs = (function () {
     `);
   }
 
+  // Whole function is locked per-device (not just the "cafe" branch) so the
+  // behavior is simplest to reason about/test — a rapid double-click on the
+  // same device's item picker (a .pick-item <div>, not a <button>, so
+  // Utils.guardDoubleClick wouldn't protect it) is rejected outright rather
+  // than racing two reads of the same session/stock. Concurrent clicks on
+  // two *different* devices use different lock keys and are never blocked by
+  // each other. On alreadyLocked, we just quietly return (no toast) — the
+  // click didn't happen fast enough to matter and there's no error to report.
   async function addItemClick(deviceId, itemId, source) {
-    let sessions = await DB.getAll("sessions");
-    let session = sessions.find((s) => s.deviceId === deviceId && s.status === "active");
-    if (!session) return;
+    let result = await Utils.withLock("session-item:pc:" + deviceId, async () => {
+      let sessions = await DB.getAll("sessions");
+      let session = sessions.find((s) => s.deviceId === deviceId && s.status === "active");
+      if (!session) return;
 
-    let item;
-    if (source === "cafe") {
-      item = await DB.get("cafeItems", itemId);
-      if (item) {
-        if (!item.unlimited && item.stock <= 0) { App.toast("موجودی تمام شده"); return; }
-        session.items.push({ itemId, name: item.name, price: item.price, qty: 1, type: "cafe" });
-        if (!item.unlimited) { item.stock--; await DB.put("cafeItems", item); }
+      let item;
+      if (source === "cafe") {
+        item = await DB.get("cafeItems", itemId);
+        if (item) {
+          if (!item.unlimited && item.stock <= 0) { App.toast("موجودی تمام شده"); return; }
+          session.items.push({ itemId, name: item.name, price: item.price, qty: 1, type: "cafe" });
+          if (!item.unlimited) { item.stock--; await DB.put("cafeItems", item); }
+        }
+      } else {
+        item = await DB.get("penaltyItems", itemId);
+        if (item) {
+          let price = item.type === "penalty" ? item.amount : -item.amount;
+          session.items.push({ itemId, name: item.name, price, qty: 1, type: item.type });
+        }
       }
-    } else {
-      item = await DB.get("penaltyItems", itemId);
       if (item) {
-        let price = item.type === "penalty" ? item.amount : -item.amount;
-        session.items.push({ itemId, name: item.name, price, qty: 1, type: item.type });
+        await DB.put("sessions", session);
+        let lastItem = session.items[session.items.length - 1];
+        await DB.logActivity("افزودن آیتم", item.name + " به سشن #" + session.id + " | " + Utils.formatCurrency(lastItem ? lastItem.price : 0));
+        App.toast("آیتم اضافه شد");
+        showSessionDetail(deviceId);
       }
-    }
-    if (item) {
-      await DB.put("sessions", session);
-      let lastItem = session.items[session.items.length - 1];
-      await DB.logActivity("افزودن آیتم", item.name + " به سشن #" + session.id + " | " + Utils.formatCurrency(lastItem ? lastItem.price : 0));
-      App.toast("آیتم اضافه شد");
-      showSessionDetail(deviceId);
-    }
+    });
+    if (result && result.alreadyLocked) return;
   }
 
   async function transferSession(deviceId) {

@@ -508,19 +508,24 @@ const Billiard = (function () {
     `);
   }
 
+  // See PCs.addItemClick for why the whole function (not just the "cafe"
+  // branch) is locked per-device, and why alreadyLocked returns quietly.
   async function addItemClick(deviceId, itemId, source) {
-    let sessions = await DB.getAll("sessions");
-    let session = sessions.find((s) => s.deviceId === deviceId && s.status === "active");
-    if (!session) return;
-    let item;
-    if (source === "cafe") {
-      item = await DB.get("cafeItems", itemId);
-      if (item) { if (!item.unlimited && item.stock <= 0) { App.toast("موجودی تمام"); return; } session.items.push({ itemId, name: item.name, price: item.price, qty: 1, type: "cafe" }); if (!item.unlimited) { item.stock--; await DB.put("cafeItems", item); } }
-    } else {
-      item = await DB.get("penaltyItems", itemId);
-      if (item) { let price = item.type === "penalty" ? item.amount : -item.amount; session.items.push({ itemId, name: item.name, price, qty: 1, type: item.type }); }
-    }
-    if (item) { await DB.put("sessions", session); let lastItem = session.items[session.items.length - 1]; await DB.logActivity("افزودن آیتم به بیلیارد", item.name + " به سشن #" + session.id + " | " + Utils.formatCurrency(lastItem ? lastItem.price : 0)); App.toast("اضافه شد"); showSessionDetail(deviceId); }
+    let result = await Utils.withLock("session-item:billiard:" + deviceId, async () => {
+      let sessions = await DB.getAll("sessions");
+      let session = sessions.find((s) => s.deviceId === deviceId && s.status === "active");
+      if (!session) return;
+      let item;
+      if (source === "cafe") {
+        item = await DB.get("cafeItems", itemId);
+        if (item) { if (!item.unlimited && item.stock <= 0) { App.toast("موجودی تمام"); return; } session.items.push({ itemId, name: item.name, price: item.price, qty: 1, type: "cafe" }); if (!item.unlimited) { item.stock--; await DB.put("cafeItems", item); } }
+      } else {
+        item = await DB.get("penaltyItems", itemId);
+        if (item) { let price = item.type === "penalty" ? item.amount : -item.amount; session.items.push({ itemId, name: item.name, price, qty: 1, type: item.type }); }
+      }
+      if (item) { await DB.put("sessions", session); let lastItem = session.items[session.items.length - 1]; await DB.logActivity("افزودن آیتم به بیلیارد", item.name + " به سشن #" + session.id + " | " + Utils.formatCurrency(lastItem ? lastItem.price : 0)); App.toast("اضافه شد"); showSessionDetail(deviceId); }
+    });
+    if (result && result.alreadyLocked) return;
   }
 
   async function transferSession(deviceId) {
