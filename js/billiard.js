@@ -55,16 +55,11 @@ const Billiard = (function () {
             ${lastBlock && !lastBlock.endTime ?
               `<button class="btn btn-sm btn-warning" onclick="Billiard.closeBlock(${device.id})">توقف</button>` :
               `<button class="btn btn-sm btn-success" onclick="Billiard.openBlock(${device.id})">شروع بلوک</button>`}
+            <button class="btn btn-sm btn-outline" onclick="Billiard.settleBlock(${device.id})">تسویه بلوک</button>
             <button class="btn btn-sm btn-primary" onclick="Billiard.settleSession(${device.id})">تسویه کل</button>
-            <div class="device-overflow">
-              <button class="btn btn-sm btn-outline" onclick="App.toggleOverflow(this)" title="بیشتر">⋯</button>
-              <div class="device-overflow-menu">
-                <button class="overflow-item" onclick="Billiard.settleBlock(${device.id})">تسویه بلوک</button>
-                <button class="overflow-item" onclick="Billiard.showAddItem(${device.id})">+ آیتم</button>
-                <button class="overflow-item" onclick="Billiard.transferSession(${device.id})">جابه‌جایی</button>
-                <button class="overflow-item danger" onclick="Billiard.cancelSession(${device.id})">لغو سشن</button>
-              </div>
-            </div>
+            <button class="btn btn-sm btn-outline" onclick="Billiard.showAddItem(${device.id})">+ آیتم</button>
+            <button class="btn btn-sm btn-outline" onclick="Billiard.transferSession(${device.id})">جابه‌جایی</button>
+            <button class="btn btn-sm btn-danger" onclick="Billiard.cancelSession(${device.id})">لغو سشن</button>
           </div>
         </div>`;
     }

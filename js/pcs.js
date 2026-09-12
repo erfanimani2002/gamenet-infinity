@@ -60,16 +60,11 @@ const PCs = (function () {
               `<button class="btn btn-sm btn-warning" onclick="PCs.closeBlock(${device.id})">توقف</button>` :
               `<button class="btn btn-sm btn-success" onclick="PCs.openBlock(${device.id})">شروع بلوک</button>`
             }
+            <button class="btn btn-sm btn-outline" onclick="PCs.settleBlock(${device.id})">تسویه بلوک</button>
             <button class="btn btn-sm btn-primary" onclick="PCs.settleSession(${device.id})">تسویه کل</button>
-            <div class="device-overflow">
-              <button class="btn btn-sm btn-outline" onclick="App.toggleOverflow(this)" title="بیشتر">⋯</button>
-              <div class="device-overflow-menu">
-                <button class="overflow-item" onclick="PCs.settleBlock(${device.id})">تسویه بلوک</button>
-                <button class="overflow-item" onclick="PCs.showAddItem(${device.id})">+ آیتم</button>
-                <button class="overflow-item" onclick="PCs.transferSession(${device.id})">جابه‌جایی</button>
-                <button class="overflow-item danger" onclick="PCs.cancelSession(${device.id})">لغو سشن</button>
-              </div>
-            </div>
+            <button class="btn btn-sm btn-outline" onclick="PCs.showAddItem(${device.id})">+ آیتم</button>
+            <button class="btn btn-sm btn-outline" onclick="PCs.transferSession(${device.id})">جابه‌جایی</button>
+            <button class="btn btn-sm btn-danger" onclick="PCs.cancelSession(${device.id})">لغو سشن</button>
           </div>
         </div>
       `;

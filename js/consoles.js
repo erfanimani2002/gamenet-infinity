@@ -60,16 +60,11 @@ const Consoles = (function () {
               `<button class="btn btn-sm btn-warning" onclick="Consoles.closeBlock(${device.id})">توقف</button>` :
               `<button class="btn btn-sm btn-success" onclick="Consoles.openBlock(${device.id})">شروع بلوک</button>`
             }
+            <button class="btn btn-sm btn-outline" onclick="Consoles.settleBlock(${device.id})">تسویه بلوک</button>
             <button class="btn btn-sm btn-primary" onclick="Consoles.settleSession(${device.id})">تسویه کل</button>
-            <div class="device-overflow">
-              <button class="btn btn-sm btn-outline" onclick="App.toggleOverflow(this)" title="بیشتر">⋯</button>
-              <div class="device-overflow-menu">
-                <button class="overflow-item" onclick="Consoles.settleBlock(${device.id})">تسویه بلوک</button>
-                <button class="overflow-item" onclick="Consoles.showAddItem(${device.id})">+ آیتم</button>
-                <button class="overflow-item" onclick="Consoles.transferSession(${device.id})">جابه‌جایی</button>
-                <button class="overflow-item danger" onclick="Consoles.cancelSession(${device.id})">لغو سشن</button>
-              </div>
-            </div>
+            <button class="btn btn-sm btn-outline" onclick="Consoles.showAddItem(${device.id})">+ آیتم</button>
+            <button class="btn btn-sm btn-outline" onclick="Consoles.transferSession(${device.id})">جابه‌جایی</button>
+            <button class="btn btn-sm btn-danger" onclick="Consoles.cancelSession(${device.id})">لغو سشن</button>
           </div>
         </div>
       `;
