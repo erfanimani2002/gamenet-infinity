@@ -110,7 +110,23 @@ const Staff = (function () {
           ${cafeItems.map((item) => `<div class="pick-item" onclick="Staff.addConsumptionAndRefreshTab(${staffId}, ${item.id})"><span class="pick-name">${Utils.escapeHtml(item.name)}</span><span class="pick-meta">${Utils.formatCurrency(item.price)}</span></div>`).join("")}
         </div>
         <h3 style="margin-top:12px">آخرین مصرف‌ها</h3>
-        ${(staff.consumption || []).slice(-5).reverse().map((c) => `<div class="block-item"><span>${Utils.escapeHtml(c.name)} x${c.qty} - ${Utils.formatCurrency(c.price * c.qty)}</span><span class="text-muted text-sm">${Jalali.formatDateTime(c.date)}</span></div>`).join("") || '<div class="text-muted text-sm">بدون مصرف</div>'}
+        ${(() => {
+          let consumption = staff.consumption || [];
+          let recentIndices = consumption.map((c, i) => i).slice(-5).reverse();
+          if (recentIndices.length === 0) return '<div class="text-muted text-sm">بدون مصرف</div>';
+          return recentIndices.map((i) => {
+            let c = consumption[i];
+            return `<div class="block-item" style="align-items:center;">
+              <span>${Utils.escapeHtml(c.name)} × ${c.qty}</span>
+              <span style="display:flex;align-items:center;gap:6px;">
+                <button class="btn btn-sm btn-outline" onclick="Staff.updateConsumptionQty(${staffId}, ${i}, -1)">−</button>
+                <span>${Utils.formatCurrency(c.price * c.qty)}</span>
+                <button class="btn btn-sm btn-outline" onclick="Staff.updateConsumptionQty(${staffId}, ${i}, 1)">+</button>
+                <button class="btn btn-sm btn-outline" onclick="Staff.removeConsumption(${staffId}, ${i})">🗑</button>
+              </span>
+            </div>`;
+          }).join("");
+        })()}
       </div>
     `;
   }
@@ -184,6 +200,10 @@ const Staff = (function () {
     `;
   }
 
+  function isSameDay(a, b) {
+    return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+  }
+
   // Locked per-staff (see PCs.addItemClick for the same pattern/rationale) so
   // two rapid clicks on the same staff member's cafe-item picker (a
   // .pick-item <div>, not protected by Utils.guardDoubleClick) can't both
@@ -197,13 +217,80 @@ const Staff = (function () {
       if (!item) return;
       if (!item.unlimited && item.stock <= 0) { App.toast("موجودی آیتم تمام شده است"); return; }
       if (!staff.consumption) staff.consumption = [];
-      staff.consumption.push({ itemId, name: item.name, price: item.price, qty: 1, date: new Date().toISOString() });
+
+      let now = new Date();
+      // Same item added again the same day is a repeat purchase, not a
+      // separate line: bump the existing row's qty instead of pushing a
+      // new one (otherwise "چیپس x1" would keep appearing on its own line
+      // every time instead of becoming "چیپس x2").
+      let existing = staff.consumption.find((c) => c.itemId === itemId && isSameDay(new Date(c.date), now));
+      if (existing) {
+        existing.qty++;
+        existing.date = now.toISOString();
+      } else {
+        staff.consumption.push({ itemId, name: item.name, price: item.price, qty: 1, date: now.toISOString() });
+      }
+
       if (!item.unlimited) { item.stock--; await DB.put("cafeItems", item); }
       await DB.put("staff", staff);
       await DB.logActivity("مصرف پرسنل", staff.name + " - " + item.name + " | " + Utils.formatCurrency(item.price));
       App.toast("مصرف ثبت شد");
     });
     if (result && result.alreadyLocked) return;
+  }
+
+  // Same lock-per-staff pattern as addConsumption/PCs.updateItemQty: keeps a
+  // rapid +/- click from racing another write to this staff member's
+  // consumption list or the shared cafeItems stock count.
+  async function updateConsumptionQty(staffId, index, delta) {
+    let result = await Utils.withLock("staff-consumption:" + staffId, async () => {
+      let staff = await DB.get("staff", staffId);
+      if (!staff.consumption || !staff.consumption[index]) return;
+      let entry = staff.consumption[index];
+      let newQty = entry.qty + delta;
+
+      let cafeItem = entry.itemId != null ? await DB.get("cafeItems", entry.itemId) : null;
+
+      if (delta > 0) {
+        if (cafeItem && !cafeItem.unlimited && cafeItem.stock <= 0) { App.toast("موجودی تمام شده"); return; }
+        if (cafeItem && !cafeItem.unlimited) { cafeItem.stock--; await DB.put("cafeItems", cafeItem); }
+      } else if (delta < 0 && cafeItem && !cafeItem.unlimited) {
+        cafeItem.stock++;
+        await DB.put("cafeItems", cafeItem);
+      }
+
+      if (newQty <= 0) {
+        staff.consumption.splice(index, 1);
+      } else {
+        entry.qty = newQty;
+      }
+
+      await DB.put("staff", staff);
+    });
+    if (result && result.alreadyLocked) return;
+    await showActivityTab(staffId);
+  }
+
+  async function removeConsumption(staffId, index) {
+    let result = await Utils.withLock("staff-consumption:" + staffId, async () => {
+      let staff = await DB.get("staff", staffId);
+      if (!staff.consumption || !staff.consumption[index]) return;
+      let entry = staff.consumption[index];
+
+      if (entry.itemId != null) {
+        let cafeItem = await DB.get("cafeItems", entry.itemId);
+        if (cafeItem && !cafeItem.unlimited) {
+          cafeItem.stock += entry.qty;
+          await DB.put("cafeItems", cafeItem);
+        }
+      }
+
+      staff.consumption.splice(index, 1);
+      await DB.put("staff", staff);
+      await DB.logActivity("حذف آیتم مصرف", entry.name + " - " + staff.name);
+    });
+    if (result && result.alreadyLocked) return;
+    await showActivityTab(staffId);
   }
 
   // Wrappers that await the underlying action before re-rendering the activity
@@ -216,6 +303,7 @@ const Staff = (function () {
 
   return {
     render, showAddStaff, saveStaff, startShift, endShift, showStaffDetail, showActivityTab, showStatsTab, addConsumption,
+    updateConsumptionQty, removeConsumption,
     startShiftAndRefreshTab, endShiftAndRefreshTab, addConsumptionAndRefreshTab,
     refresh,
   };
