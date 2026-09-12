@@ -223,6 +223,7 @@ const Overnight = (function () {
     let r = await DB.get("overnightReservations", id);
     if (!r) return;
     let customer = await DB.get("customers", r.customerId);
+    let customers = await DB.getAll("customers");
     let allTx = await getTransactionsFor(id);
     allTx.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
     let totals = computeTotals(r, allTx);
