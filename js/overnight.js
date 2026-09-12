@@ -229,11 +229,14 @@ const Overnight = (function () {
     let totals = computeTotals(r, allTx);
 
     let itemsHtml = (r.items || []).map((it, i) => `
-      <div class="list-row">
-        <span class="row-value">${Utils.escapeHtml(it.name)}</span>
-        <span class="row-value">x${it.qty}</span>
-        <span class="row-value amount">${Utils.formatCurrency(it.price * it.qty)}</span>
-        <span class="text-muted text-sm">${Jalali.timeString(new Date(it.addedAt))}</span>
+      <div class="block-item" style="align-items:center;">
+        <span>${Utils.escapeHtml(it.name)} × ${it.qty}</span>
+        <span style="display:flex;align-items:center;gap:6px;">
+          <button class="btn btn-sm btn-outline" onclick="Overnight.updateItemQty(${r.id}, ${i}, -1)">−</button>
+          <span class="amount">${Utils.formatCurrency(it.price * it.qty)}</span>
+          <button class="btn btn-sm btn-outline" onclick="Overnight.updateItemQty(${r.id}, ${i}, 1)">+</button>
+          <button class="btn btn-sm btn-outline" onclick="Overnight.removeItem(${r.id}, ${i})">🗑</button>
+        </span>
       </div>
     `).join("");
 
@@ -287,6 +290,7 @@ const Overnight = (function () {
         ${canComplete ? `<button class="btn btn-primary" onclick="Overnight.completeReservation(${r.id})">تکمیل رزرو</button>` : ""}
         ${canRefund ? `<button class="btn btn-outline" onclick="Overnight.showRefund(${r.id})">استرداد وجه</button>` : ""}
         ${canCancel ? `<button class="btn btn-danger" onclick="Overnight.showCancel(${r.id})">لغو رزرو</button>` : ""}
+        <button class="btn btn-danger btn-outline" onclick="Overnight.deleteReservation(${r.id})">🗑 حذف رزرو</button>
         <button class="btn btn-outline" onclick="App.closeModalForce()">بستن</button>
       </div>
     `);
@@ -295,10 +299,16 @@ const Overnight = (function () {
   // ---- Items ---------------------------------------------------------
   async function showAddItem(id) {
     let cafeItems = await DB.getAll("cafeItems");
+    let penalties = await DB.getAll("penaltyItems");
     App.openModal(`
       <h2>افزودن آیتم به رزرو #${id}</h2>
+      <h3>آیتم‌های کافی‌شاپ</h3>
       <div class="pick-list">
         ${cafeItems.map((item) => `<div class="pick-item" onclick="Overnight.addItemClick(${id}, ${item.id}, 'cafe')"><span class="pick-name">${Utils.escapeHtml(item.name)}</span><span class="pick-meta">${Utils.formatCurrency(item.price)}</span></div>`).join("")}
+      </div>
+      <h3 style="margin-top:12px">جریمه/تخفیف</h3>
+      <div class="pick-list">
+        ${penalties.map((item) => `<div class="pick-item" onclick="Overnight.addItemClick(${id}, ${item.id}, 'penalty')"><span class="pick-name">${Utils.escapeHtml(item.name)}</span><span class="pick-meta">${item.type === 'penalty' ? '+' : '-'}${Utils.formatCurrency(item.amount)}</span></div>`).join("")}
       </div>
       <hr class="section-divider">
       <h3>هزینه دلخواه</h3>
@@ -315,22 +325,105 @@ const Overnight = (function () {
     await withItemLock(id, async () => {
       let reservation = await DB.get("overnightReservations", id);
       if (!reservation || reservation.status !== "active") return { success: false };
-      let item = await DB.get("cafeItems", itemId);
-      if (!item) return { success: false };
-      if (!item.unlimited && item.stock <= 0) { App.toast("موجودی تمام شده"); return { success: false }; }
 
-      let price = applyDiscountPct(item.price, reservation.discountPercent || 0);
-      reservation.items.push({ itemId, name: item.name, price, qty: 1, type: "cafe", addedAt: new Date().toISOString() });
-      let updatedItem = item.unlimited ? null : { ...item, stock: item.stock - 1 };
+      let item;
+      if (source === "cafe") {
+        item = await DB.get("cafeItems", itemId);
+        if (!item) return { success: false };
+        let existing = reservation.items.find((it) => it.itemId === itemId);
+        if (existing) {
+          if (!item.unlimited && item.stock <= 0) { App.toast("موجودی تمام شده"); return { success: false }; }
+          existing.qty++;
+          if (!item.unlimited) {
+            await DB.put("cafeItems", { ...item, stock: item.stock - 1 });
+          }
+        } else {
+          if (!item.unlimited && item.stock <= 0) { App.toast("موجودی تمام شده"); return { success: false }; }
+          let price = applyDiscountPct(item.price, reservation.discountPercent || 0);
+          reservation.items.push({ itemId, name: item.name, price, qty: 1, type: "cafe", addedAt: new Date().toISOString() });
+          if (!item.unlimited) {
+            await DB.put("cafeItems", { ...item, stock: item.stock - 1 });
+          }
+        }
+      } else {
+        item = await DB.get("penaltyItems", itemId);
+        if (!item) return { success: false };
+        let price = item.type === "penalty" ? item.amount : -item.amount;
+        let existing = reservation.items.find((it) => it.itemId === itemId);
+        if (existing) {
+          existing.qty++;
+        } else {
+          reservation.items.push({ itemId, name: item.name, price, qty: 1, type: item.type, addedAt: new Date().toISOString() });
+        }
+      }
 
-      await DB.runAtomic([
-        { store: "overnightReservations", type: "put", data: reservation },
-        ...(updatedItem ? [{ store: "cafeItems", type: "put", data: updatedItem }] : []),
-      ]);
-      await DB.logActivity("افزودن آیتم به رزرو شب", "رزرو #" + id + " | " + item.name + " | " + Utils.formatCurrency(price));
+      await DB.put("overnightReservations", reservation);
+      await DB.logActivity("افزودن آیتم به رزرو شب", "رزرو #" + id + " | " + item.name);
       App.toast("آیتم اضافه شد");
       showAddItem(id);
       return { success: true };
+    });
+  }
+
+  async function updateItemQty(id, index, delta) {
+    await withItemLock(id, async () => {
+      let reservation = await DB.get("overnightReservations", id);
+      if (!reservation || !reservation.items[index]) return;
+
+      let item = reservation.items[index];
+      let newQty = item.qty + delta;
+
+      if (delta > 0 && item.type === "cafe" && item.itemId != null) {
+        let cafeItem = await DB.get("cafeItems", item.itemId);
+        if (cafeItem && !cafeItem.unlimited && cafeItem.stock <= 0) {
+          App.toast("موجودی تمام شده");
+          return;
+        }
+        if (cafeItem && !cafeItem.unlimited) {
+          await DB.put("cafeItems", { ...cafeItem, stock: cafeItem.stock - 1 });
+        }
+      }
+
+      if (delta < 0 && item.type === "cafe" && item.itemId != null) {
+        let cafeItem = await DB.get("cafeItems", item.itemId);
+        if (cafeItem && !cafeItem.unlimited) {
+          await DB.put("cafeItems", { ...cafeItem, stock: cafeItem.stock + 1 });
+        }
+      }
+
+      if (newQty <= 0) {
+        if (item.type === "cafe" && item.itemId != null) {
+          let cafeItem = await DB.get("cafeItems", item.itemId);
+          if (cafeItem && !cafeItem.unlimited) {
+            await DB.put("cafeItems", { ...cafeItem, stock: cafeItem.stock + item.qty });
+          }
+        }
+        reservation.items.splice(index, 1);
+      } else {
+        item.qty = newQty;
+      }
+
+      await DB.put("overnightReservations", reservation);
+      viewReservation(id);
+    });
+  }
+
+  async function removeItem(id, index) {
+    await withItemLock(id, async () => {
+      let reservation = await DB.get("overnightReservations", id);
+      if (!reservation || !reservation.items[index]) return;
+
+      let item = reservation.items[index];
+      if (item.type === "cafe" && item.itemId != null) {
+        let cafeItem = await DB.get("cafeItems", item.itemId);
+        if (cafeItem && !cafeItem.unlimited) {
+          await DB.put("cafeItems", { ...cafeItem, stock: cafeItem.stock + item.qty });
+        }
+      }
+
+      reservation.items.splice(index, 1);
+      await DB.put("overnightReservations", reservation);
+      viewReservation(id);
     });
   }
 
@@ -516,6 +609,70 @@ const Overnight = (function () {
     });
   }
 
+  // ---- Delete (permanent removal) -----------------------------------------
+  async function deleteReservation(id) {
+    if (!confirm("آیا از حذف این رزرو مطمئن هستید؟ تمام اطلاعات حذف خواهد شد.")) return;
+
+    let reservation = await DB.get("overnightReservations", id);
+    if (!reservation) return;
+
+    let allTx = await getTransactionsFor(id);
+
+    // Restore cafe item stock
+    let cafeItemChanges = {};
+    let cafeItems = await DB.getAll("cafeItems");
+    for (let it of reservation.items || []) {
+      if (it.type === "cafe" && it.itemId != null) {
+        let ci = cafeItems.find((c) => c.id === it.itemId);
+        if (ci && !ci.unlimited) {
+          if (!cafeItemChanges[ci.id]) cafeItemChanges[ci.id] = { ...ci };
+          cafeItemChanges[ci.id].stock += it.qty || 1;
+        }
+      }
+    }
+
+    // Reverse any payments
+    let customerChanges = {};
+    for (let t of allTx) {
+      if (t.type !== "payment") continue;
+      let payerId = t.customerId || reservation.customerId;
+      if (!payerId) continue;
+      if (!customerChanges[payerId]) {
+        let c = await DB.get("customers", payerId);
+        if (c) customerChanges[payerId] = { ...c };
+      }
+      let c = customerChanges[payerId];
+      if (!c) continue;
+      let amount = t.amount || 0;
+      let payBreakdown = t.payBreakdown;
+      if (payBreakdown && typeof payBreakdown === "object") {
+        let w = payBreakdown.wallet || 0, d = payBreakdown.debt || 0, other = (payBreakdown.cash || 0) + (payBreakdown.card || 0);
+        if (w) { c.wallet = (c.wallet || 0) + w; c.totalPaid = Math.max(0, (c.totalPaid || 0) - w); }
+        if (d) { c.debt = Math.max(0, (c.debt || 0) - d); }
+        if (other) { c.totalPaid = Math.max(0, (c.totalPaid || 0) - other); }
+      } else if (t.payType === "wallet") {
+        c.wallet = (c.wallet || 0) + amount; c.totalPaid = Math.max(0, (c.totalPaid || 0) - amount);
+      } else if (t.payType === "debt") {
+        c.debt = Math.max(0, (c.debt || 0) - amount);
+      } else {
+        c.totalPaid = Math.max(0, (c.totalPaid || 0) - amount);
+      }
+    }
+
+    let txRemovals = allTx.map((t) => ({ store: "overnightTransactions", type: "remove", data: t.id }));
+    let ops = [
+      ...Object.values(customerChanges).map((c) => ({ store: "customers", type: "put", data: c })),
+      ...Object.values(cafeItemChanges).map((ci) => ({ store: "cafeItems", type: "put", data: ci })),
+      ...txRemovals,
+      { store: "overnightReservations", type: "remove", data: id },
+    ];
+
+    await DB.runAtomic(ops);
+    await DB.logActivity("حذف رزرو شب", "رزرو #" + id);
+    App.toast("رزرو حذف شد");
+    refresh();
+  }
+
   // ---- Refund (only for cancelled reservations with money already paid) --
   async function showRefund(id) {
     let reservation = await DB.get("overnightReservations", id);
@@ -653,10 +810,10 @@ const Overnight = (function () {
 
   return {
     render, showAddReservation, createReservation, viewReservation,
-    showAddItem, addItemClick, addCustomItem,
+    showAddItem, addItemClick, addCustomItem, updateItemQty, removeItem,
     showRecordPayment, recordPayment,
     completeReservation,
-    showCancel, cancelReservation,
+    showCancel, cancelReservation, deleteReservation,
     showRefund, refundReservation,
     computeTotals, getTransactionsFor, CATEGORIES,
     toggleCombinedPayment, updateCombinedCheck
