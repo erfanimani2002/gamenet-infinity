@@ -545,7 +545,7 @@ const PCs = (function () {
       </div>`;
     }).join("");
 
-    let itemsHtml = (session.items || []).map((it) => `<div class="block-item"><span>${Utils.escapeHtml(it.name)} x${it.qty}</span><span>${Utils.formatCurrency(it.price * it.qty)}</span></div>`).join("");
+    let itemsHtml = (session.items || []).map((it, i) => `<div class="block-item" style="align-items:center;"><span>${Utils.escapeHtml(it.name)} × ${it.qty}</span><span style="display:flex;align-items:center;gap:6px;"><button class="btn btn-sm btn-outline" onclick="PCs.updateItemQty(${deviceId}, ${i}, -1)">−</button><span>${Utils.formatCurrency(it.price * it.qty)}</span><button class="btn btn-sm btn-outline" onclick="PCs.updateItemQty(${deviceId}, ${i}, 1)">+</button><button class="btn btn-sm btn-outline" onclick="PCs.removeItem(${deviceId}, ${i})">🗑</button></span></div>`).join("");
     let totalItems = (session.items || []).reduce((s, i) => s + (i.price * i.qty), 0);
     let totalBlocks = (session.timeBlocks || []).reduce((s, b) => s + (b.price || 0), 0);
 
@@ -603,24 +603,105 @@ const PCs = (function () {
       if (source === "cafe") {
         item = await DB.get("cafeItems", itemId);
         if (item) {
-          if (!item.unlimited && item.stock <= 0) { App.toast("موجودی تمام شده"); return; }
-          session.items.push({ itemId, name: item.name, price: item.price, qty: 1, type: "cafe" });
-          if (!item.unlimited) { item.stock--; await DB.put("cafeItems", item); }
+          let existing = session.items.find((it) => it.itemId === itemId);
+          if (existing) {
+            if (!item.unlimited && item.stock <= 0) { App.toast("موجودی تمام شده"); return; }
+            existing.qty++;
+            if (!item.unlimited) { item.stock--; await DB.put("cafeItems", item); }
+          } else {
+            if (!item.unlimited && item.stock <= 0) { App.toast("موجودی تمام شده"); return; }
+            session.items.push({ itemId, name: item.name, price: item.price, qty: 1, type: "cafe" });
+            if (!item.unlimited) { item.stock--; await DB.put("cafeItems", item); }
+          }
         }
       } else {
         item = await DB.get("penaltyItems", itemId);
         if (item) {
+          let existing = session.items.find((it) => it.itemId === itemId);
           let price = item.type === "penalty" ? item.amount : -item.amount;
-          session.items.push({ itemId, name: item.name, price, qty: 1, type: item.type });
+          if (existing) {
+            existing.qty++;
+          } else {
+            session.items.push({ itemId, name: item.name, price, qty: 1, type: item.type });
+          }
         }
       }
       if (item) {
         await DB.put("sessions", session);
-        let lastItem = session.items[session.items.length - 1];
-        await DB.logActivity("افزودن آیتم", item.name + " به سشن #" + session.id + " | " + Utils.formatCurrency(lastItem ? lastItem.price : 0));
+        await DB.logActivity("افزودن آیتم", item.name + " به سشن #" + session.id);
         App.toast("آیتم اضافه شد");
         showSessionDetail(deviceId);
       }
+    });
+    if (result && result.alreadyLocked) return;
+  }
+
+  async function updateItemQty(deviceId, index, delta) {
+    let result = await Utils.withLock("session-item:pc:" + deviceId, async () => {
+      let sessions = await DB.getAll("sessions");
+      let session = sessions.find((s) => s.deviceId === deviceId && s.status === "active");
+      if (!session || !session.items[index]) return;
+
+      let item = session.items[index];
+      let newQty = item.qty + delta;
+
+      if (delta > 0 && item.type === "cafe") {
+        let cafeItem = await DB.get("cafeItems", item.itemId);
+        if (cafeItem && !cafeItem.unlimited && cafeItem.stock <= 0) {
+          App.toast("موجودی تمام شده");
+          return;
+        }
+        if (cafeItem && !cafeItem.unlimited) {
+          cafeItem.stock--;
+          await DB.put("cafeItems", cafeItem);
+        }
+      }
+
+      if (delta < 0 && item.type === "cafe") {
+        let cafeItem = item.itemId != null ? await DB.get("cafeItems", item.itemId) : null;
+        if (cafeItem && !cafeItem.unlimited) {
+          cafeItem.stock++;
+          await DB.put("cafeItems", cafeItem);
+        }
+      }
+
+      if (newQty <= 0) {
+        if (item.type === "cafe") {
+          let cafeItem = item.itemId != null ? await DB.get("cafeItems", item.itemId) : null;
+          if (cafeItem && !cafeItem.unlimited) {
+            cafeItem.stock += item.qty;
+            await DB.put("cafeItems", cafeItem);
+          }
+        }
+        session.items.splice(index, 1);
+      } else {
+        item.qty = newQty;
+      }
+
+      await DB.put("sessions", session);
+      showSessionDetail(deviceId);
+    });
+    if (result && result.alreadyLocked) return;
+  }
+
+  async function removeItem(deviceId, index) {
+    let result = await Utils.withLock("session-item:pc:" + deviceId, async () => {
+      let sessions = await DB.getAll("sessions");
+      let session = sessions.find((s) => s.deviceId === deviceId && s.status === "active");
+      if (!session || !session.items[index]) return;
+
+      let item = session.items[index];
+      if (item.type === "cafe") {
+        let cafeItem = item.itemId != null ? await DB.get("cafeItems", item.itemId) : null;
+        if (cafeItem && !cafeItem.unlimited) {
+          cafeItem.stock += item.qty;
+          await DB.put("cafeItems", cafeItem);
+        }
+      }
+
+      session.items.splice(index, 1);
+      await DB.put("sessions", session);
+      showSessionDetail(deviceId);
     });
     if (result && result.alreadyLocked) return;
   }
@@ -780,7 +861,7 @@ const PCs = (function () {
   return {
     render, turnOn, confirmTurnOn, openBlock, closeBlock, confirmCloseBlock,
     settleBlock, settleSingleBlock, settleSession, confirmSettleSession,
-    showSessionDetail, showAddItem, addItemClick, transferSession, confirmTransfer,
+    showSessionDetail, showAddItem, addItemClick, updateItemQty, removeItem, transferSession, confirmTransfer,
     cancelSession, quickCreateCustomer,
     filterCustomers, pickCustomer, refresh,
     toggleCombinedPayment, updateCombinedCheck
