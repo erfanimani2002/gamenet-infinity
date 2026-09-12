@@ -29,6 +29,10 @@
 //   are capped to what remains un-refunded so re-running it can't double-pay.
 const Overnight = (function () {
   const CATEGORIES = ["entrance", "items", "other"];
+  // Which sub-view of the tab is showing: "today" (tonight's reservations +
+  // per-section report) or "history" (previous nights). Purely UI state,
+  // not persisted.
+  let state = { view: "today" };
 
   function typeLabel(type) {
     return type === "console" ? "کنسول" : type === "billiard" ? "بیلیارد" : "پی‌سی";
@@ -115,14 +119,48 @@ const Overnight = (function () {
     return DB.getByIndex("overnightTransactions", "by_reservation", reservationId);
   }
 
+  // ---- Capacity (one reservation slot per physical device, per night) ----
+  // "Night" here is the same business-day window used everywhere else for
+  // reporting ([23:35, next 23:35)) so that capacity resets exactly when a
+  // new night's reports would start. Cancelled reservations free up their
+  // slot immediately.
+  const SECTION_TYPES = ["pc", "console", "billiard"];
+
+  async function getCapacityInfo(reservations, devices) {
+    reservations = reservations || (await DB.getAll("overnightReservations"));
+    devices = devices || (await DB.getAll("devices"));
+    let range = Utils.getReportRange();
+    let todays = reservations.filter((r) => {
+      let created = new Date(r.createdAt);
+      return created >= range.start && created < range.end && r.status !== "cancelled";
+    });
+    let info = {};
+    SECTION_TYPES.forEach((type) => {
+      let total = devices.filter((d) => d.type === type).length;
+      let used = todays.filter((r) => r.type === type).length;
+      info[type] = { total, used, remaining: Math.max(0, total - used) };
+    });
+    return info;
+  }
+
+  function isToday(reservation, range) {
+    let created = new Date(reservation.createdAt);
+    return created >= range.start && created < range.end;
+  }
+
   // ---- List tab -------------------------------------------------------
   async function render(el) {
     let reservations = await DB.getAll("overnightReservations");
-    reservations.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
     let allTx = await DB.getAll("overnightTransactions");
     let customers = await DB.getAll("customers");
+    let devices = await DB.getAll("devices");
+    let range = Utils.getReportRange();
 
-    let rows = await Promise.all(reservations.map(async (r) => {
+    let todayReservations = reservations.filter((r) => isToday(r, range)).sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+    let historyReservations = reservations.filter((r) => !isToday(r, range)).sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+    let capacity = await getCapacityInfo(reservations, devices);
+
+    function rowHtml(r) {
       let totals = computeTotals(r, allTx);
       let customer = customers.find((c) => c.id === r.customerId);
       let statusClass = r.status === "active" ? "status-busy" : r.status === "completed" ? "status-free" : "status-cancelled";
@@ -139,7 +177,23 @@ const Overnight = (function () {
           <button class="btn btn-sm btn-outline" onclick="Overnight.viewReservation(${r.id})">جزئیات</button>
         </div>
       `;
-    }));
+    }
+
+    // Today's report, broken out per section (PC / Console / Billiard).
+    let activeToday = todayReservations.filter((r) => r.status !== "cancelled");
+    let sectionReportHtml = SECTION_TYPES.map((type) => {
+      let list = activeToday.filter((r) => r.type === type);
+      let revenue = list.reduce((s, r) => s + computeTotals(r, allTx).netPaid, 0);
+      let cap = capacity[type];
+      return `
+        <div class="list-row">
+          <span class="row-label">${typeLabel(type)}</span>
+          <span class="row-value">${list.length} رزرو</span>
+          <span class="row-value ${cap.remaining <= 0 ? 'amount negative' : ''}">ظرفیت: ${cap.used}/${cap.total}</span>
+          <span class="row-value amount">${Utils.formatCurrency(revenue)}</span>
+        </div>
+      `;
+    }).join("");
 
     let html = `
       <div class="card">
@@ -147,10 +201,29 @@ const Overnight = (function () {
           <h2>رزروهای شب</h2>
           <button class="btn btn-primary" onclick="Overnight.showAddReservation()">+ افزودن رزرو</button>
         </div>
-        ${rows.join("") || '<div class="text-muted">رزروی برای شب جاری ثبت نشده</div>'}
+        <div class="sub-tabs" style="display:flex;gap:8px;margin-bottom:12px;">
+          <button class="btn btn-sm ${state.view === 'today' ? 'btn-primary' : 'btn-outline'}" onclick="Overnight.setView('today')">رزروهای امروز</button>
+          <button class="btn btn-sm ${state.view === 'history' ? 'btn-primary' : 'btn-outline'}" onclick="Overnight.setView('history')">تاریخچه شب‌های قبل</button>
+        </div>
+
+        ${state.view === "today" ? `
+          <h3>گزارش امشب به تفکیک بخش</h3>
+          ${sectionReportHtml}
+          <hr class="section-divider">
+          <h3>رزروهای امشب</h3>
+          ${todayReservations.map(rowHtml).join("") || '<div class="text-muted">رزروی برای شب جاری ثبت نشده</div>'}
+        ` : `
+          <h3>تاریخچه رزروهای شب‌های قبل</h3>
+          ${historyReservations.map(rowHtml).join("") || '<div class="text-muted">تاریخچه‌ای وجود ندارد</div>'}
+        `}
       </div>
     `;
     el.innerHTML = html;
+  }
+
+  function setView(view) {
+    state.view = view;
+    refresh();
   }
 
   // ---- Create ------------------------------------------------------------
@@ -158,15 +231,20 @@ const Overnight = (function () {
     let customers = await DB.getAll("customers");
     let pricing = await DB.getSetting("pricing", {});
     let fee = pricing.overnightEntranceFee != null ? pricing.overnightEntranceFee : 100000;
+    let capacity = await getCapacityInfo();
+
+    let typeOptions = SECTION_TYPES.map((type) => {
+      let cap = capacity[type];
+      let full = cap.remaining <= 0;
+      return `<option value="${type}" ${full ? "disabled" : ""}>${typeLabel(type)} (${cap.used}/${cap.total}${full ? " — ظرفیت تکمیل" : ""})</option>`;
+    }).join("");
 
     App.openModal(`
       <h2>رزرو شب جدید</h2>
       <div class="form-group"><label>مشتری</label>${Utils.renderPayerSelect(customers, customers[0] && customers[0].id, "newResCustomer")}</div>
       <div class="form-group"><label>نوع خدمت</label>
         <select id="newResType">
-          <option value="pc">پی‌سی</option>
-          <option value="console">کنسول</option>
-          <option value="billiard">بیلیارد</option>
+          ${typeOptions}
         </select>
       </div>
       <div class="form-group"><label>ورودی رزرو شب (تومان)</label><input type="number" id="newResFee" value="${fee}" min="0"></div>
@@ -185,6 +263,16 @@ const Overnight = (function () {
       let baseFee = parseInt(document.getElementById("newResFee").value) || 0;
       let notes = document.getElementById("newResNotes").value.trim();
       if (!customerId) { App.toast("مشتری را انتخاب کنید"); return { success: false }; }
+
+      // Re-check capacity server-side (not just the disabled <option> in the
+      // form) so a race between two rapid submissions — or a stale-open
+      // modal — can never push a section over its device count for the
+      // night.
+      let capacity = await getCapacityInfo();
+      if (!capacity[type] || capacity[type].remaining <= 0) {
+        App.toast("ظرفیت رزرو این بخش برای امشب تکمیل شده است");
+        return { success: false };
+      }
 
       // Lock the customer's club discount at creation time too — same rule as
       // the entrance fee itself: a later change to the customer's rank/discount
@@ -253,7 +341,7 @@ const Overnight = (function () {
     let canPay = r.status !== "cancelled" && totals.remainingBalance > 0;
     let canAddItem = r.status === "active";
     let canCancel = r.status !== "cancelled";
-    let canComplete = r.status === "active";
+    let canSettle = r.status === "active";
     let canRefund = r.status === "cancelled" && (totals.totalPayments - totals.totalRefunds) > 0;
 
     App.openModal(`
@@ -286,8 +374,8 @@ const Overnight = (function () {
 
       <hr class="section-divider">
       <div class="modal-actions" style="flex-wrap:wrap">
-        ${canPay ? `<button class="btn btn-success" onclick="Overnight.showRecordPayment(${r.id})">ثبت پرداخت</button>` : ""}
-        ${canComplete ? `<button class="btn btn-primary" onclick="Overnight.completeReservation(${r.id})">تکمیل رزرو</button>` : ""}
+        ${canPay ? `<button class="btn btn-success" onclick="Overnight.showRecordPayment(${r.id})">پیش‌پرداخت</button>` : ""}
+        ${canSettle ? `<button class="btn btn-primary" onclick="Overnight.showSettle(${r.id})">تسویه</button>` : ""}
         ${canRefund ? `<button class="btn btn-outline" onclick="Overnight.showRefund(${r.id})">استرداد وجه</button>` : ""}
         ${canCancel ? `<button class="btn btn-danger" onclick="Overnight.showCancel(${r.id})">لغو رزرو</button>` : ""}
         <button class="btn btn-danger btn-outline" onclick="Overnight.deleteReservation(${r.id})">🗑 حذف رزرو</button>
@@ -309,13 +397,6 @@ const Overnight = (function () {
       <h3 style="margin-top:12px">جریمه/تخفیف</h3>
       <div class="pick-list">
         ${penalties.map((item) => `<div class="pick-item" onclick="Overnight.addItemClick(${id}, ${item.id}, 'penalty')"><span class="pick-name">${Utils.escapeHtml(item.name)}</span><span class="pick-meta">${item.type === 'penalty' ? '+' : '-'}${Utils.formatCurrency(item.amount)}</span></div>`).join("")}
-      </div>
-      <hr class="section-divider">
-      <h3>هزینه دلخواه</h3>
-      <div class="form-inline">
-        <div class="form-group"><label>عنوان</label><input type="text" id="customItemName"></div>
-        <div class="form-group"><label>مبلغ</label><input type="number" id="customItemPrice" min="0"></div>
-        <button class="btn btn-sm btn-outline" onclick="Overnight.addCustomItem(${id})">افزودن</button>
       </div>
       <div class="modal-actions"><button class="btn btn-outline" onclick="Overnight.viewReservation(${id})">بازگشت</button></div>
     `);
@@ -427,25 +508,6 @@ const Overnight = (function () {
     });
   }
 
-  async function addCustomItem(id) {
-    let name = document.getElementById("customItemName").value.trim();
-    let inputPrice = parseInt(document.getElementById("customItemPrice").value) || 0;
-    if (!name || inputPrice <= 0) { App.toast("عنوان و مبلغ معتبر وارد کنید"); return; }
-
-    await withItemLock(id, async () => {
-      let reservation = await DB.get("overnightReservations", id);
-      if (!reservation || reservation.status !== "active") return { success: false };
-
-      let price = applyDiscountPct(inputPrice, reservation.discountPercent || 0);
-      reservation.items.push({ itemId: null, name, price, qty: 1, type: "other", addedAt: new Date().toISOString() });
-      await DB.put("overnightReservations", reservation);
-      await DB.logActivity("افزودن هزینه دلخواه به رزرو شب", "رزرو #" + id + " | " + name + " | " + Utils.formatCurrency(price));
-      App.toast("هزینه اضافه شد");
-      showAddItem(id);
-      return { success: true };
-    });
-  }
-
   // ---- Payment ---------------------------------------------------------
   async function showRecordPayment(id) {
     let reservation = await DB.get("overnightReservations", id);
@@ -455,7 +517,7 @@ const Overnight = (function () {
     let settlerHtml = await Utils.renderSettlerSelect();
 
     App.openModal(`
-      <h2>ثبت پرداخت — رزرو #${id}</h2>
+      <h2>پیش‌پرداخت — رزرو #${id}</h2>
       <div class="list-row"><span class="row-label">مانده قابل پرداخت</span><span class="row-value amount">${Utils.formatCurrency(totals.remainingBalance)}</span></div>
       <div class="form-group"><label>مبلغ پرداخت</label><input type="number" id="payAmount" value="${totals.remainingBalance}" min="1" max="${totals.remainingBalance}"></div>
       <div class="form-group"><label>روش پرداخت</label>
@@ -528,15 +590,105 @@ const Overnight = (function () {
     });
   }
 
-  // ---- Completion --------------------------------------------------------
-  async function completeReservation(id) {
+  // ---- Settle (pay off remaining balance and complete, in one step) ------
+  async function showSettle(id) {
+    let reservation = await DB.get("overnightReservations", id);
+    if (!reservation || reservation.status !== "active") return;
+    let allTx = await getTransactionsFor(id);
+    let totals = computeTotals(reservation, allTx);
+
+    // Nothing left to collect — just close the reservation out, no payment
+    // step needed.
+    if (totals.remainingBalance <= 0) {
+      await finalizeSettle(id, null);
+      return;
+    }
+
+    let settlerHtml = await Utils.renderSettlerSelect();
+    App.openModal(`
+      <h2>تسویه — رزرو #${id}</h2>
+      <div class="list-row"><span class="row-label">مانده قابل پرداخت</span><span class="row-value amount">${Utils.formatCurrency(totals.remainingBalance)}</span></div>
+      <div class="form-group"><label>مبلغ پرداخت</label><input type="number" id="settleAmount" value="${totals.remainingBalance}" min="1" max="${totals.remainingBalance}"></div>
+      <div class="form-group"><label>روش پرداخت</label>
+        <select id="settleMethod" onchange="Overnight.toggleCombinedPayment('settleMethod', 'settleCombinedFields', ${totals.remainingBalance})"><option value="cash">نقدی</option><option value="card">کارتی</option><option value="wallet">کیف‌پول</option><option value="debt">بدهکاری</option><option value="combined">ترکیبی (نقدی + کارتی)</option></select>
+      </div>
+      <div id="settleCombinedFields" style="display:none; margin-top:8px;">
+        <div class="form-group"><label>مبلغ کارتی</label><input type="number" id="settleCombinedCardAmount" min="0" oninput="Overnight.updateCombinedCheck('settleCombinedCardAmount', 'settleCombinedCashAmount', 'settleCombinedCheck', ${totals.remainingBalance})"></div>
+        <div class="form-group"><label>مبلغ نقدی</label><input type="number" id="settleCombinedCashAmount" min="0" oninput="Overnight.updateCombinedCheck('settleCombinedCardAmount', 'settleCombinedCashAmount', 'settleCombinedCheck', ${totals.remainingBalance})"></div>
+        <div id="settleCombinedCheck" class="text-sm" style="margin-top:4px;"></div>
+      </div>
+      <div class="form-group"><label>ثبت‌کننده</label>${settlerHtml}</div>
+      <div class="modal-actions">
+        <button class="btn btn-primary" onclick="Overnight.confirmSettle(${id})">تسویه</button>
+        <button class="btn btn-outline" onclick="Overnight.viewReservation(${id})">انصراف</button>
+      </div>
+    `);
+  }
+
+  async function confirmSettle(id) {
+    await Utils.guardDoubleClick(async () => {
+      let amountInput = parseInt(document.getElementById("settleAmount").value) || 0;
+      let payType = document.getElementById("settleMethod").value;
+      if (payType === "combined") {
+        let cardAmt = parseInt(document.getElementById("settleCombinedCardAmount").value) || 0;
+        let cashAmt = parseInt(document.getElementById("settleCombinedCashAmount").value) || 0;
+        if (cardAmt + cashAmt !== amountInput) { App.toast("مبلغ‌ها با کل مطابقت ندارد"); return { success: false }; }
+        payType = { card: cardAmt, cash: cashAmt };
+      }
+      let settlerName = Utils.getSettlerName();
+
+      let reservation = await DB.get("overnightReservations", id);
+      if (!reservation || reservation.status !== "active") { App.toast("این رزرو قابل تسویه نیست"); return { success: false }; }
+
+      let allTx = await getTransactionsFor(id);
+      let totals = computeTotals(reservation, allTx);
+      let amount = Math.min(amountInput, totals.remainingBalance);
+      if (amount <= 0) { App.toast("مبلغ نامعتبر است"); return { success: false }; }
+
+      let categoryBreakdown = { entrance: 0, items: 0, other: 0 };
+      let left = amount;
+      CATEGORIES.forEach((c) => {
+        if (left <= 0) return;
+        let take = Math.min(left, totals.remaining[c]);
+        categoryBreakdown[c] = take;
+        left -= take;
+      });
+
+      let customer = await DB.get("customers", reservation.customerId);
+      let payResult = Utils.computePaymentUpdate(customer, amount, payType);
+      if (!payResult.success) { App.toast("پرداخت ناموفق بود"); return { success: false }; }
+
+      let tx = {
+        reservationId: id, customerId: reservation.customerId, type: "payment",
+        amount, payType: payResult.payType, payBreakdown: payResult.payBreakdown,
+        categoryBreakdown, settlerName, timestamp: new Date().toISOString(), status: "active",
+      };
+
+      reservation.status = "completed";
+      reservation.checkOut = new Date().toISOString();
+
+      await DB.runAtomic([
+        { store: "customers", type: "put", data: payResult.customer },
+        { store: "overnightTransactions", type: "add", data: tx },
+        { store: "overnightReservations", type: "put", data: reservation },
+      ]);
+      await DB.logActivity("تسویه رزرو شب", "رزرو #" + id + " | " + Utils.formatCurrency(amount) + " | " + payResult.payType + " | " + settlerName);
+      App.toast("رزرو تسویه شد");
+      viewReservation(id);
+      return { success: true };
+    });
+  }
+
+  // Closes out a reservation with nothing left to pay — no payment
+  // transaction needed, just mark it completed.
+  async function finalizeSettle(id) {
     let reservation = await DB.get("overnightReservations", id);
     if (!reservation || reservation.status !== "active") return;
     reservation.status = "completed";
     reservation.checkOut = new Date().toISOString();
     await DB.put("overnightReservations", reservation);
-    await DB.logActivity("تکمیل رزرو شب", "رزرو #" + id);
-    App.toast("رزرو تکمیل شد");
+    await DB.logActivity("تسویه رزرو شب", "رزرو #" + id + " | بدون مانده");
+    App.toast("رزرو تسویه شد");
     viewReservation(id);
   }
 
@@ -561,11 +713,20 @@ const Overnight = (function () {
       // so a duplicate click/request can never create a second writeoff.
       if (reservation.status === "cancelled") { App.toast("این رزرو قبلاً لغو شده است"); App.closeModalForce(); return { success: true }; }
 
-      let reasonEl = document.getElementById("cancelReason");
-      let reason = reasonEl ? reasonEl.value.trim() : "";
-
       let allTx = await getTransactionsFor(id);
       let totals = computeTotals(reservation, allTx);
+
+      // No money has been collected yet — "cancel" just means the
+      // reservation never happened, so remove it outright instead of
+      // keeping a soft-cancelled record with a writeoff to reconcile.
+      if (totals.totalPayments - totals.totalRefunds <= 0) {
+        App.closeModalForce();
+        await deleteReservation(id, true);
+        return { success: true };
+      }
+
+      let reasonEl = document.getElementById("cancelReason");
+      let reason = reasonEl ? reasonEl.value.trim() : "";
 
       let cafeItemChanges = {};
       if (reservation.status === "active") {
@@ -610,8 +771,8 @@ const Overnight = (function () {
   }
 
   // ---- Delete (permanent removal) -----------------------------------------
-  async function deleteReservation(id) {
-    if (!confirm("آیا از حذف این رزرو مطمئن هستید؟ تمام اطلاعات حذف خواهد شد.")) return;
+  async function deleteReservation(id, skipConfirm) {
+    if (!skipConfirm && !confirm("آیا از حذف این رزرو مطمئن هستید؟ تمام اطلاعات حذف خواهد شد.")) return;
 
     let reservation = await DB.get("overnightReservations", id);
     if (!reservation) return;
@@ -809,13 +970,13 @@ const Overnight = (function () {
   }
 
   return {
-    render, showAddReservation, createReservation, viewReservation,
-    showAddItem, addItemClick, addCustomItem, updateItemQty, removeItem,
+    render, setView, showAddReservation, createReservation, viewReservation,
+    showAddItem, addItemClick, updateItemQty, removeItem,
     showRecordPayment, recordPayment,
-    completeReservation,
+    showSettle, confirmSettle,
     showCancel, cancelReservation, deleteReservation,
     showRefund, refundReservation,
-    computeTotals, getTransactionsFor, CATEGORIES,
+    computeTotals, getTransactionsFor, getCapacityInfo, CATEGORIES, SECTION_TYPES,
     toggleCombinedPayment, updateCombinedCheck
   };
 })();
