@@ -83,7 +83,7 @@ const Tournaments = (function () {
 
   async function showCreateTournament(editData) {
     let isEdit = !!editData;
-    let t = editData || { name: "", gameType: "football", bracketType: "elimination", participantCount: 8, teamSize: 1, billiardFormat: "2stick", entryFee: 0, prizes: [{ place: 1, label: "قهرمان", amount: 0 }], startDate: "", endDate: "", pcRateManual: 0 };
+    let t = editData || { name: "", gameType: "football", bracketType: "elimination", participantCount: 8, teamSize: 1, billiardFormat: "2stick", entryFee: 0, prizes: [{ place: 1, label: "قهرمان", amount: 0 }], startDate: "", endDate: "" };
 
     App.openModal(`
       <h2>${isEdit ? 'ویرایش مسابقه' : 'مسابقه جدید'}</h2>
@@ -106,7 +106,6 @@ const Tournaments = (function () {
       <div class="form-group"><label>تاریخ شروع</label><input type="text" id="tStartDate" value="${t.startDate || ''}" placeholder="مثلاً ۱۴۰۴/۰۳/۱۵"></div>
       <div class="form-group"><label>تاریخ پایان (اختیاری)</label><input type="text" id="tEndDate" value="${t.endDate || ''}"></div>
       <div class="form-group"><label>حق ورود (تومان)</label><input type="number" id="tEntryFee" value="${t.entryFee}" min="0"></div>
-      <div class="form-group"><label>نرخ ساعتی PC (تومان) — اختیاری</label><input type="number" id="tPcRate" value="${t.pcRateManual || 0}" min="0"></div>
       <hr class="section-divider">
       <h3 style="margin-bottom:10px;">جوایز</h3>
       <div id="tPrizesList"></div>
@@ -186,7 +185,6 @@ const Tournaments = (function () {
       bracketType: document.getElementById("tBracketType").value,
       participantCount: parseInt(document.getElementById("tParticipantCount").value) || 8,
       entryFee: parseInt(document.getElementById("tEntryFee").value) || 0,
-      pcRateManual: parseInt(document.getElementById("tPcRate").value) || 0,
       startDate: document.getElementById("tStartDate").value.trim(),
       endDate: document.getElementById("tEndDate").value.trim(),
       prizes: getCurrentPrizes(),
@@ -332,17 +330,18 @@ const Tournaments = (function () {
           }).join("")}
         </div>
         <div class="form-group">
-          <select id="addParticipantSelect" style="width:100%;">
-            <option value="">انتخاب شناسه...</option>
+          <label>افزودن شرکت‌کننده</label>
+          <input type="text" id="addParticipantSearch" placeholder="جستجوی شناسه یا نام..." oninput="Tournaments.filterAddParticipantList()">
+          <div class="customer-pick-list" id="addParticipantList">
             ${customers.filter((c) => !participants.includes(c.id)).map((c) => {
               let fullName = ((c.firstName || "") + " " + (c.lastName || "")).trim();
-              let idLabel = c.displayId || c.id;
-              let label = fullName ? fullName + " #" + idLabel : "#" + idLabel;
-              return `<option value="${c.id}">${label}</option>`;
+              let idLabel = "#" + (c.displayId || c.id);
+              let searchLabel = idLabel + (fullName ? " " + fullName : "");
+              let label = fullName ? fullName + " " + idLabel : idLabel;
+              return `<div class="list-row customer-pick" data-search="${Utils.escapeHtml(searchLabel)}" onclick="Tournaments.addParticipant(${id}, ${c.id})"><span class="row-label">${Utils.escapeHtml(label)}</span></div>`;
             }).join("")}
-          </select>
+          </div>
         </div>
-        <button class="btn btn-sm btn-outline" onclick="Tournaments.addParticipant(${id})">افزودن شرکت‌کننده</button>
         ` : `
         <hr class="section-divider">
         <h3 style="margin-bottom:8px;">شرکت‌کنندگان (${participants.length})</h3>
@@ -476,7 +475,7 @@ const Tournaments = (function () {
     if (isReady) classes.push("ready");
 
     return `<div class="${classes.join(" ")}" onclick="Tournaments.openMatch(${m.id})">
-      <div class="match-header">بازی ${m.matchIndex + 1}</div>
+      <div class="match-header">${m.isThirdPlace ? 'رده‌بندی (رتبه سوم)' : 'بازی ' + (m.matchIndex + 1)}</div>
       <div class="player-row ${winnerA ? "winner" : ""}">
         <span class="player-name">${nameA}</span>
         <span class="player-score">${scoreA}</span>
@@ -516,9 +515,17 @@ const Tournaments = (function () {
     return '#' + displayNum;
   }
 
-  async function addParticipant(tournamentId) {
-    let sel = document.getElementById("addParticipantSelect");
-    let customerId = parseInt(sel.value);
+  function filterAddParticipantList() {
+    let query = (document.getElementById("addParticipantSearch")?.value || "").trim().toLowerCase();
+    let list = document.getElementById("addParticipantList");
+    if (!list) return;
+    list.querySelectorAll(".customer-pick").forEach((row) => {
+      let searchable = (row.getAttribute("data-search") || "").toLowerCase();
+      row.style.display = searchable.includes(query) ? "" : "none";
+    });
+  }
+
+  async function addParticipant(tournamentId, customerId) {
     if (!customerId) return;
     let t = await DB.get("tournaments", tournamentId);
     if (!t) return;
@@ -589,55 +596,46 @@ const Tournaments = (function () {
   // at-or-above the participant count (not on `n` directly), because
   // advanceWinner()'s progression math (nextMatchIndex = floor(matchIndex/2))
   // assumes a perfect binary tree from round to round. With an `n`-based
-  // round size (the old behaviour) that assumption breaks for any non-
-  // power-of-2 participant count: later rounds end up with fewer incoming
-  // winners than slots, and matches get stuck waiting for a "player" that
-  // will never arrive. Sizing rounds off `bracketSize` fixes that structurally,
-  // and any leftover slots (`bracketSize - n`) become byes: a participant
-  // with no round-1 opponent who is automatically marked the winner of an
-  // already-"completed" round-1 slot, so bracket progression starts correctly
-  // without any manual assignment.
+  // round size that assumption breaks for any non-power-of-2 participant
+  // count: later rounds end up with fewer incoming winners than slots, and
+  // matches get stuck waiting for a "player" that will never arrive. Sizing
+  // rounds off `bracketSize` fixes that structurally.
+  //
+  // Round-1 matchups themselves are left empty (playerA/playerB null) —
+  // the admin/manager picks who plays whom for round 1 via the existing
+  // "انتخاب بازیکنان" UI (assignMatchPlayers), including designating a bye
+  // by assigning only one side of a match. From round 2 onward, matches
+  // fill in automatically as winners advance (advanceWinner).
   function generateEliminationBracket(t, participants) {
     let n = participants.length;
     let bracketSize = 2;
     while (bracketSize < n) bracketSize *= 2;
     let totalRounds = Math.log2(bracketSize);
-    let byeCount = bracketSize - n;
     let round1Count = bracketSize / 2;
     let matches = [];
 
-    // Participants are seeded into round 1 in their current list order (no
-    // random-seeding option exists elsewhere in the app to honor here).
-    // The first `byeCount` round-1 slots each get a single participant and
-    // an automatic bye; the remaining slots are normal 2-player matches.
-    let pIdx = 0;
     for (let i = 0; i < round1Count; i++) {
-      let isByeMatch = i < byeCount;
-      let playerA = pIdx < n ? participants[pIdx++] : null;
-      let playerB = isByeMatch ? null : (pIdx < n ? participants[pIdx++] : null);
-      let isBye = isByeMatch && playerA != null;
-
       matches.push({
         tournamentId: t.id,
         round: 1,
         matchIndex: i,
-        playerA: playerA,
-        playerB: playerB,
-        scoreA: isBye ? 1 : null,
-        scoreB: isBye ? 0 : null,
-        winner: isBye ? playerA : null,
+        playerA: null,
+        playerB: null,
+        scoreA: null,
+        scoreB: null,
+        winner: null,
         deviceId: null,
         timerStart: null,
         timerEnd: null,
         deviceCost: 0,
         items: [],
-        status: isBye ? "completed" : "pending",
+        status: "pending",
         settled: false,
         settlePayType: null,
         settleAmount: 0,
         settlerName: "",
         settledAt: null,
-        isBye: isBye,
+        isBye: false,
       });
     }
 
@@ -667,6 +665,39 @@ const Tournaments = (function () {
         });
       }
     }
+
+    // A 3rd place prize means the two semifinal losers also play each other
+    // (only meaningful in elimination brackets with an actual semifinal
+    // round, i.e. bracketSize >= 4). This extra match sits alongside the
+    // final in the same round and is fed by advanceWinner() routing each
+    // semifinal's loser into it.
+    let hasThirdPlacePrize = (t.prizes || []).some((p) => p.place === 3 && (p.amount || 0) > 0);
+    if (hasThirdPlacePrize && totalRounds >= 2) {
+      matches.push({
+        tournamentId: t.id,
+        round: totalRounds,
+        matchIndex: 1,
+        playerA: null,
+        playerB: null,
+        scoreA: null,
+        scoreB: null,
+        winner: null,
+        deviceId: null,
+        timerStart: null,
+        timerEnd: null,
+        deviceCost: 0,
+        items: [],
+        status: "pending",
+        settled: false,
+        settlePayType: null,
+        settleAmount: 0,
+        settlerName: "",
+        settledAt: null,
+        isBye: false,
+        isThirdPlace: true,
+      });
+    }
+
     return matches;
   }
 
@@ -796,7 +827,7 @@ const Tournaments = (function () {
 
     App.openModal(`
       <div style="max-height:80vh;overflow-y:auto;">
-        <h2>بازی ${match.matchIndex + 1} — دور ${match.round}</h2>
+        <h2>${match.isThirdPlace ? 'بازی رده‌بندی (رتبه سوم)' : 'بازی ' + (match.matchIndex + 1) + ' — دور ' + match.round}</h2>
         <div style="font-size:15px;margin-bottom:12px;font-weight:600;">${nameA} vs ${nameB}</div>
 
         ${playerAssignmentHtml}
@@ -866,15 +897,34 @@ const Tournaments = (function () {
   async function assignMatchPlayers(matchId) {
     let match = await DB.get("matches", matchId);
     if (!match) return;
-    let playerA = parseInt(document.getElementById("assignPlayerA").value);
-    let playerB = parseInt(document.getElementById("assignPlayerB").value);
-    if (!playerA || !playerB) { App.toast("هر دو بازیکن را انتخاب کنید"); return; }
-    if (playerA === playerB) { App.toast("بازیکنان باید متفاوت باشند"); return; }
+    let rawA = document.getElementById("assignPlayerA").value;
+    let rawB = document.getElementById("assignPlayerB").value;
+    let playerA = rawA ? parseInt(rawA) : null;
+    let playerB = rawB ? parseInt(rawB) : null;
+    if (!playerA && !playerB) { App.toast("حداقل یک بازیکن را انتخاب کنید"); return; }
+    if (playerA && playerB && playerA === playerB) { App.toast("بازیکنان باید متفاوت باشند"); return; }
 
-    match.playerA = playerA;
-    match.playerB = playerB;
+    // Only one side picked = a bye: that participant automatically advances
+    // without playing a match. Normalize the lone player onto playerA so
+    // bye matches render consistently regardless of which dropdown was used.
+    let isBye = !!(playerA && !playerB) || !!(playerB && !playerA);
+    if (isBye) {
+      let solo = playerA || playerB;
+      match.playerA = solo;
+      match.playerB = null;
+      match.scoreA = 1;
+      match.scoreB = 0;
+      match.winner = solo;
+      match.status = "completed";
+      match.isBye = true;
+    } else {
+      match.playerA = playerA;
+      match.playerB = playerB;
+    }
+
     await DB.put("matches", match);
-    App.toast("بازیکنان انتخاب شدند");
+    if (isBye) await advanceWinner(match);
+    App.toast(isBye ? "بای ثبت شد" : "بازیکنان انتخاب شدند");
     manageTournament(match.tournamentId);
   }
 
@@ -1036,7 +1086,7 @@ const Tournaments = (function () {
         try { allMatches = await DB.getByIndex("matches", "by_tournament", match.tournamentId); } catch (e) { allMatches = (await DB.getAll("matches")).filter((m) => m.tournamentId === match.tournamentId); }
         let nextRound = match.round + 1;
         let nextMatchIdx = Math.floor(match.matchIndex / 2);
-        let nextMatch = allMatches.find((m) => m.round === nextRound && m.matchIndex === nextMatchIdx);
+        let nextMatch = allMatches.find((m) => m.round === nextRound && m.matchIndex === nextMatchIdx && !m.isThirdPlace);
         if (nextMatch) {
           if (match.matchIndex % 2 === 0) {
             nextMatch.playerA = null;
@@ -1044,6 +1094,15 @@ const Tournaments = (function () {
             nextMatch.playerB = null;
           }
           await DB.put("matches", nextMatch);
+        }
+        let thirdPlaceMatch = allMatches.find((m) => m.round === nextRound && m.isThirdPlace);
+        if (thirdPlaceMatch) {
+          if (match.matchIndex % 2 === 0) {
+            thirdPlaceMatch.playerA = null;
+          } else {
+            thirdPlaceMatch.playerB = null;
+          }
+          await DB.put("matches", thirdPlaceMatch);
         }
       }
     } else {
@@ -1064,7 +1123,7 @@ const Tournaments = (function () {
 
     let nextRound = match.round + 1;
     let nextMatchIdx = Math.floor(match.matchIndex / 2);
-    let nextMatch = allMatches.find((m) => m.round === nextRound && m.matchIndex === nextMatchIdx);
+    let nextMatch = allMatches.find((m) => m.round === nextRound && m.matchIndex === nextMatchIdx && !m.isThirdPlace);
 
     if (nextMatch) {
       if (match.matchIndex % 2 === 0) {
@@ -1073,6 +1132,19 @@ const Tournaments = (function () {
         nextMatch.playerB = match.winner;
       }
       await DB.put("matches", nextMatch);
+    }
+
+    // Semifinal losers feed the 3rd-place playoff (when one exists) — it
+    // lives alongside the final, in the round right after the semifinals.
+    let thirdPlaceMatch = allMatches.find((m) => m.round === nextRound && m.isThirdPlace);
+    if (thirdPlaceMatch && match.playerA && match.playerB) {
+      let loser = match.winner === match.playerA ? match.playerB : match.playerA;
+      if (match.matchIndex % 2 === 0) {
+        thirdPlaceMatch.playerA = loser;
+      } else {
+        thirdPlaceMatch.playerB = loser;
+      }
+      await DB.put("matches", thirdPlaceMatch);
     }
   }
 
@@ -1362,18 +1434,26 @@ const Tournaments = (function () {
       <hr class="section-divider">
       <div class="form-group"><label>برنده</label><select id="prizeWinnerId">${customerOptions}</select></div>
       <div class="form-group"><label>نحوه پرداخت</label>
-        <select id="prizePayoutMethod" onchange="Tournaments.toggleCombinedPayment('prizePayoutMethod', 'prizeCombinedFields', ${prize.amount})"><option value="cash">نقد (از صندوق)</option><option value="card">کارتی</option><option value="wallet">افزودن به کیف‌پول</option><option value="combined">ترکیبی (نقدی + کارتی)</option></select>
+        <select id="prizePayoutMethod" onchange="Tournaments.togglePrizeThirdParty()">
+          <option value="cash">نقدی</option>
+          <option value="pasargad">پاسارگاد</option>
+          <option value="other">سایر</option>
+        </select>
       </div>
-      <div id="prizeCombinedFields" style="display:none; margin-top:8px;">
-        <div class="form-group"><label>مبلغ کارتی</label><input type="number" id="prizeCombinedCardAmount" min="0" oninput="Tournaments.updateCombinedCheck('prizeCombinedCardAmount', 'prizeCombinedCashAmount', 'prizeCombinedCheck', ${prize.amount})"></div>
-        <div class="form-group"><label>مبلغ نقدی</label><input type="number" id="prizeCombinedCashAmount" min="0" oninput="Tournaments.updateCombinedCheck('prizeCombinedCardAmount', 'prizeCombinedCashAmount', 'prizeCombinedCheck', ${prize.amount})"></div>
-        <div id="prizeCombinedCheck" class="text-sm" style="margin-top:4px;"></div>
+      <div class="form-group" id="prizeThirdPartyGroup" style="display:none">
+        <label>نام پرداخت‌کننده (شخص ثالث)</label>
+        <input type="text" id="prizeThirdParty" placeholder="نام شخص">
       </div>
       <div class="modal-actions">
         <button class="btn btn-success" onclick="Tournaments.confirmPayoutPrize(${tournamentId}, ${place})">پرداخت</button>
         <button class="btn btn-outline" onclick="App.closeModalForce()">انصراف</button>
       </div>
     `);
+  }
+
+  function togglePrizeThirdParty() {
+    let group = document.getElementById("prizeThirdPartyGroup");
+    if (group) group.style.display = document.getElementById("prizePayoutMethod").value === "other" ? "block" : "none";
   }
 
   async function confirmPayoutPrize(tournamentId, place) {
@@ -1386,43 +1466,41 @@ const Tournaments = (function () {
       if (existing) { App.toast("این جایزه قبلاً پرداخت شده است"); return { success: false }; }
 
       let winnerId = parseInt(document.getElementById("prizeWinnerId").value) || 0;
-      let method = document.getElementById("prizePayoutMethod").value;
-      if (method === "combined") {
-        let cardAmt = parseInt(document.getElementById("prizeCombinedCardAmount").value) || 0;
-        let cashAmt = parseInt(document.getElementById("prizeCombinedCashAmount").value) || 0;
-        if (cardAmt + cashAmt !== prize.amount) { App.toast("مبلغ‌ها با کل مطابقت ندارد"); return { success: false }; }
-        method = { card: cardAmt, cash: cashAmt };
-      }
       if (!winnerId) { App.toast("برنده را انتخاب کنید"); return { success: false }; }
+      let payType = document.getElementById("prizePayoutMethod").value;
+      let thirdParty = document.getElementById("prizeThirdParty")?.value.trim() || "";
+      let customers = await DB.getAll("customers");
+      let winnerName = getParticipantName(winnerId, customers);
+      let prizeLabel = prize.label || ("جایگاه " + place);
 
-      // A cash/card payout is money leaving the till (like a purchase); crediting
-      // the wallet instead just moves it onto the customer's account, so it is
-      // recorded but doesn't reduce the day's cash reconciliation total.
-      let payoutRecord = { tournamentId, place, customerId: winnerId, amount: prize.amount, payType: (typeof method === "object") ? "combined" : (method === "wallet" ? "wallet" : method), date: new Date().toISOString() };
-      let ops = [];
-      if (method === "wallet" || (typeof method === "object" && method.wallet > 0)) {
-        let customer = await DB.get("customers", winnerId);
-        if (!customer) { App.toast("مشتری یافت نشد"); return { success: false }; }
-        let walletAmt = typeof method === "object" ? (method.wallet || 0) : prize.amount;
-        customer.wallet = (customer.wallet || 0) + walletAmt;
-        ops.push({ store: "customers", type: "put", data: customer });
-      } else if (typeof method === "object") {
-        // For combined, use computePaymentUpdate
-        let customer = await DB.get("customers", winnerId);
-        if (!customer) { App.toast("مشتری یافت نشد"); return { success: false }; }
-        let payResult = Utils.computePaymentUpdate(customer, prize.amount, method);
-        if (!payResult.success) { App.toast("پرداخت ناموفق بود"); return { success: false }; }
-        ops.push({ store: "customers", type: "put", data: payResult.customer });
-        payoutRecord.payType = payResult.payType;
-      }
-      ops.push({ store: "prizePayouts", type: "add", data: payoutRecord });
+      // Prize payouts are recorded exactly like a regular purchase — same
+      // three payment methods (نقدی/پاسارگاد/سایر) and the same deferred-
+      // settlement flow for "سایر" — and they land in the purchases list
+      // itself, so tournament prize money always shows up in the daily
+      // purchases/expense reconciliation.
+      let payoutRecord = { tournamentId, place, customerId: winnerId, amount: prize.amount, payType, date: new Date().toISOString() };
+      let purchaseRecord = {
+        category: "tournament_prize",
+        description: "جایزه مسابقه: " + t.name + " — " + prizeLabel + " — برنده: " + winnerName,
+        amount: prize.amount,
+        paymentType: payType,
+        thirdParty,
+        date: new Date().toISOString(),
+        settled: false,
+      };
+
+      let ops = [
+        { store: "prizePayouts", type: "add", data: payoutRecord },
+        { store: "purchases", type: "add", data: purchaseRecord },
+      ];
 
       await DB.runAtomic(ops);
 
-      await DB.logActivity("پرداخت جایزه مسابقه", t.name + " — " + (prize.label || ('جایگاه ' + place)) + " — " + Utils.formatCurrency(prize.amount));
+      await DB.logActivity("پرداخت جایزه مسابقه", t.name + " — " + prizeLabel + " — " + Utils.formatCurrency(prize.amount));
       App.closeModalForce();
       App.toast("جایزه پرداخت شد");
       manageTournament(tournamentId);
+      Purchases.refresh?.();
       return { success: true };
     });
   }
@@ -1668,6 +1746,7 @@ const Tournaments = (function () {
     changeStatus,
     manageTournament,
     addParticipant,
+    filterAddParticipantList,
     removeParticipant,
     startTournament,
     openMatch,
@@ -1684,6 +1763,7 @@ const Tournaments = (function () {
     settleAllMatches,
     confirmSettleAllMatches,
     payoutPrize,
+    togglePrizeThirdParty,
     confirmPayoutPrize,
     refresh,
     toggleCombinedPayment,

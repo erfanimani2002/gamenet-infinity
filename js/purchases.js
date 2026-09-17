@@ -50,7 +50,7 @@ const Purchases = (function () {
           let origLabel = p.paymentType === "other" && p.settled ? `<span class="text-muted text-sm">(اصلی: سایر)</span>` : "";
           return `
           <div class="list-row">
-            <span class="row-label">${p.category === 'items' ? 'موارد' : 'یخچال'}</span>
+            <span class="row-label">${p.category === 'items' ? 'موارد' : p.category === 'tournament_prize' ? 'جایزه مسابقه' : 'یخچال'}</span>
             <span class="row-value">${Utils.escapeHtml(p.description || '-')}</span>
             <span class="row-value amount">${Utils.formatCurrency(p.amount)}</span>
             <span class="row-value">${typeLabel} ${origLabel}</span>
@@ -151,7 +151,7 @@ const Purchases = (function () {
     let effLabel = effType === 'cash' ? 'نقدی' : effType === 'pasargad' ? 'پاسارگاد' : 'سایر';
     App.openModal(`
       <h2>جزئیات خرید</h2>
-      <div class="list-row"><span class="row-label">دسته</span><span class="row-value">${p.category === 'items' ? 'موارد' : 'یخچال'}</span></div>
+      <div class="list-row"><span class="row-label">دسته</span><span class="row-value">${p.category === 'items' ? 'موارد' : p.category === 'tournament_prize' ? 'جایزه مسابقه' : 'یخچال'}</span></div>
       <div class="list-row"><span class="row-label">توضیحات</span><span class="row-value">${Utils.escapeHtml(p.description || '-')}</span></div>
       <div class="list-row"><span class="row-label">مبلغ</span><span class="row-value amount">${Utils.formatCurrency(p.amount)}</span></div>
       <div class="list-row"><span class="row-label">روش پرداخت</span><span class="row-value">${effLabel}</span></div>
