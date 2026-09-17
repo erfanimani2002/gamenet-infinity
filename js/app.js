@@ -134,7 +134,11 @@ const App = (function () {
     }
     try {
       let user = await Auth.login(u, p);
-      showApp(user);
+      if (Auth.mustChangePassword()) {
+        showPasswordChangeModal(user);
+      } else {
+        showApp(user);
+      }
     } catch (e) {
       err.textContent = e.message;
     }
@@ -153,6 +157,45 @@ const App = (function () {
     Reports.autoClosePastDays();
 
     startDayCloseReminder();
+  }
+
+  function showPasswordChangeModal(user) {
+    App.openModal(`
+      <h2>تغییر رمز عبور</h2>
+      <p class="text-muted text-sm mb-2">برای اولین ورود، لطفاً رمز عبور خود را تغییر دهید.</p>
+      <div class="form-group"><label>رمز عبور جدید</label><input type="password" id="forceNewPass" placeholder="رمز عبور جدید"></div>
+      <div class="form-group"><label>تکرار رمز عبور</label><input type="password" id="forceNewPass2" placeholder="تکرار رمز عبور"></div>
+      <div id="forcePassError" style="color:var(--danger);font-size:13px;margin-bottom:8px;"></div>
+      <div class="modal-actions">
+        <button class="btn btn-primary" onclick="App.submitForcePasswordChange()">ذخیره</button>
+      </div>
+    `);
+    let passInput = document.getElementById("forceNewPass");
+    if (passInput) passInput.focus();
+  }
+
+  async function submitForcePasswordChange() {
+    let pass = document.getElementById("forceNewPass").value.trim();
+    let pass2 = document.getElementById("forceNewPass2").value.trim();
+    let errEl = document.getElementById("forcePassError");
+    errEl.textContent = "";
+    if (!pass || pass.length < 4) {
+      errEl.textContent = "رمز عبور باید حداقل ۴ کاراکتر باشد";
+      return;
+    }
+    if (pass !== pass2) {
+      errEl.textContent = "رمزهای عبور مطابقت ندارند";
+      return;
+    }
+    try {
+      await Auth.changeMyPassword(pass);
+      closeModalForce();
+      let user = Auth.getSession();
+      showApp(user);
+      toast("رمز عبور با موفقیت تغییر کرد");
+    } catch (e) {
+      errEl.textContent = e.message;
+    }
   }
 
   document.addEventListener("visibilitychange", () => {
@@ -457,6 +500,7 @@ const App = (function () {
     toggleUserMenu,
     toggleTheme,
     toggleOverflow,
+    submitForcePasswordChange,
   };
 })();
 

@@ -25,7 +25,7 @@ const Auth = (function () {
       }
     }
     if (user) {
-      currentUser = { id: user.id, username: user.username, role: user.role, name: user.name };
+      currentUser = { id: user.id, username: user.username, role: user.role, name: user.name, mustChangePassword: !!user.mustChangePassword };
       sessionStorage.setItem("gnet_user", JSON.stringify(currentUser));
       await DB.logActivity("لاگین", "ورود کاربر: " + user.username, currentUser.id);
       return currentUser;
@@ -70,5 +70,20 @@ const Auth = (function () {
     return adminAllowed.includes(feature);
   }
 
-  return { login, logout, getSession, isAdmin, isManager, canAccess, hashPassword };
+  function mustChangePassword() {
+    return currentUser && currentUser.mustChangePassword;
+  }
+
+  async function changeMyPassword(newPassword) {
+    var users = await DB.getAll("users");
+    var user = users.find(function (u) { return u.id === currentUser.id; });
+    if (!user) throw new Error("کاربر یافت نشد");
+    user.password = await hashPassword(newPassword);
+    user.mustChangePassword = false;
+    await DB.put("users", user);
+    currentUser.mustChangePassword = false;
+    sessionStorage.setItem("gnet_user", JSON.stringify(currentUser));
+  }
+
+  return { login, logout, getSession, isAdmin, isManager, canAccess, hashPassword, mustChangePassword, changeMyPassword };
 })();

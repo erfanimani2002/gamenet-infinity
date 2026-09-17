@@ -13,7 +13,11 @@ const MIME = {
   ".png": "image/png",
   ".jpg": "image/jpeg",
   ".jpeg": "image/jpeg",
+  ".svg": "image/svg+xml",
+  ".ico": "image/x-icon",
+  ".woff": "font/woff",
   ".woff2": "font/woff2",
+  ".ttf": "font/ttf",
   ".json": "application/json",
 };
 
@@ -22,7 +26,7 @@ fs.mkdirSync(BACKUP_DIR, { recursive: true });
 http.createServer((req, res) => {
   if (req.method === "OPTIONS") {
     res.writeHead(204, {
-      "Access-Control-Allow-Origin": "*",
+      "Access-Control-Allow-Origin": "http://127.0.0.1:3000",
       "Access-Control-Allow-Methods": "POST, OPTIONS",
       "Access-Control-Allow-Headers": "Content-Type",
     });
@@ -64,12 +68,25 @@ http.createServer((req, res) => {
           res.writeHead(403, { "Content-Type": "application/json" });
           return res.end(JSON.stringify({ ok: false, error: "forbidden" }));
         }
-        fs.writeFileSync(file, body);
-        res.writeHead(200, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ ok: true, file: name }));
+        fs.writeFile(file, body, (writeErr) => {
+          if (writeErr) {
+            console.error("backup write error:", writeErr);
+            res.writeHead(500, { "Content-Type": "application/json" });
+            return res.end(JSON.stringify({ ok: false, error: "server error" }));
+          }
+          res.writeHead(200, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ ok: true, file: name }));
+          fs.readdir(BACKUP_DIR, (listErr, files) => {
+            if (listErr || !files || files.length <= 100) return;
+            files.sort();
+            var toDelete = files.slice(0, files.length - 100);
+            toDelete.forEach(function (f) { fs.unlink(path.join(BACKUP_DIR, f), function () {}); });
+          });
+        });
       } catch (e) {
+        console.error("backup error:", e);
         res.writeHead(500, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ ok: false, error: String(e.message || e) }));
+        res.end(JSON.stringify({ ok: false, error: "server error" }));
       }
     });
     return;

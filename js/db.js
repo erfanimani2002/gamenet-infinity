@@ -322,8 +322,8 @@ const DB = (function () {
       }
       var adminHash = await hashPw("admin");
       var managerHash = await hashPw("manager");
-      await add("users", { username: "admin", password: adminHash, role: "admin", name: "ادمین" });
-      await add("users", { username: "manager", password: managerHash, role: "manager", name: "مدیر" });
+      await add("users", { username: "admin", password: adminHash, role: "admin", name: "ادمین", mustChangePassword: true });
+      await add("users", { username: "manager", password: managerHash, role: "manager", name: "مدیر", mustChangePassword: true });
     }
   }
 

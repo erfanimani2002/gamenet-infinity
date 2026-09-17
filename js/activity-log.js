@@ -17,7 +17,10 @@ const ActivityLog = (function () {
       <div class="card">
         <div class="card-header">
           <h2>لاگ فعالیت</h2>
-          <div class="text-muted text-sm">${logs.length} رویداد</div>
+          <div class="flex-gap">
+            <div class="text-muted text-sm">${logs.length} رویداد</div>
+            ${Auth.isManager() ? '<button class="btn btn-sm btn-outline" onclick="ActivityLog.clearOldLogs()">پاک کردن لاگ‌های قدیمی‌تر از ۳۰ روز</button>' : ''}
+          </div>
         </div>
         <div class="search-box mb-4">
           <input type="text" id="logSearch" placeholder="جستجو..." oninput="ActivityLog.filterLogs()">
@@ -44,5 +47,21 @@ const ActivityLog = (function () {
     });
   }
 
-  return { render, filterLogs };
+  async function clearOldLogs() {
+    if (!confirm("آیا از پاک کردن تمام لاگ‌های قدیمی‌تر از ۳۰ روز مطمئن هستید؟")) return;
+    let logs = await DB.getAll("activityLog");
+    let cutoff = new Date();
+    cutoff.setDate(cutoff.getDate() - 30);
+    let deleted = 0;
+    for (let log of logs) {
+      if (new Date(log.timestamp) < cutoff) {
+        await DB.remove("activityLog", log.id);
+        deleted++;
+      }
+    }
+    App.toast(deleted + " رویداد قدیمی پاک شد");
+    render(document.getElementById("tab-activityLog"));
+  }
+
+  return { render, filterLogs, clearOldLogs };
 })();

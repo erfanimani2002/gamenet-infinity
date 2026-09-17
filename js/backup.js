@@ -219,14 +219,14 @@ const Backup = (function () {
       let data = await DB.exportAll();
       data._exportDate = new Date().toISOString();
       data._version = 1;
-      let json = JSON.stringify(data, null, 2);
+      let json = JSON.stringify(data);
       let blob = new Blob([json], { type: "application/json" });
       let url = URL.createObjectURL(blob);
       let a = document.createElement("a");
       a.href = url;
       a.download = "گیمنت_اینفینیتی_بک‌آپ_" + Jalali.formatDate(new Date()).replace(/\//g, "-") + ".json";
       a.click();
-      URL.revokeObjectURL(url);
+      setTimeout(function () { URL.revokeObjectURL(url); }, 100);
       await DB.logActivity("بک‌آپ JSON", "خروجی کامل داده‌ها");
       App.toast("بک‌آپ دانلود شد");
     } catch (e) {
@@ -241,11 +241,24 @@ const Backup = (function () {
   async function importJSON(event) {
     let file = event.target.files[0];
     if (!file) return;
+    if (file.size > 100 * 1024 * 1024) {
+      App.toast("فایل بیش از ۱۰۰ مگابایت است — لطفاً فایل کوچک‌تری انتخاب کنید");
+      event.target.value = "";
+      return;
+    }
     if (!confirm("آیا از بازیابی این فایل مطمئن هستید؟ تمام داده‌های فعلی بازنویسی می‌شوند.")) return;
 
     try {
+      App.toast("بازیابی در حال انجام است... لطفاً صبر کنید");
       let text = await file.text();
-      let data = JSON.parse(text);
+      let data;
+      try {
+        data = JSON.parse(text);
+      } catch (parseErr) {
+        App.toast("فایل معتبر نیست — فایل JSON صحیح انتخاب کنید");
+        event.target.value = "";
+        return;
+      }
       let result = await DB.importAll(data);
       await DB.logActivity("بازیابی بک‌آپ", "بازیابی از فایل JSON");
       if (result && result.errors && result.errors.length > 0) {
@@ -269,11 +282,15 @@ const Backup = (function () {
       data._exportDate = new Date().toISOString();
       data._version = 1;
       data._name = "gamenet-auto-backup.json";
+      let controller = new AbortController();
+      let timeoutId = setTimeout(function () { controller.abort(); }, 30000);
       let res = await fetch("/api/backup", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(data),
+        signal: controller.signal,
       });
+      clearTimeout(timeoutId);
       if (!res.ok) throw new Error("backup http " + res.status);
       await DB.logActivity("بک‌آپ خودکار", new Date().toLocaleTimeString("fa-IR"));
 
