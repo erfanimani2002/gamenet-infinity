@@ -122,7 +122,7 @@ const Utils = (function () {
   function escapeHtml(str) {
     let div = document.createElement("div");
     div.appendChild(document.createTextNode(str));
-    return div.innerHTML;
+    return div.innerHTML.replace(/"/g, "&quot;").replace(/'/g, "&#39;");
   }
 
   function renderSelectLabel(list, value) {

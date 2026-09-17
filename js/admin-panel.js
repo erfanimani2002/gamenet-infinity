@@ -206,7 +206,13 @@ const AdminPanel = (function () {
       App.toast("این دستگاه سشن باز دارد — ابتدا سشن را لغو یا تسویه کنید");
       return;
     }
-    if (!confirm("آیا از حذف این دستگاه مطمئن هستید؟")) return;
+    let sessions = await DB.getAll("sessions");
+    let relatedSessions = sessions.filter((s) => s.deviceId === id);
+    let confirmMsg = "آیا از حذف این دستگاه مطمئن هستید؟";
+    if (relatedSessions.length > 0) {
+      confirmMsg += "\n\nتوجه: " + relatedSessions.length + " سشن تاریخی با این دستگاه مرتبط است. پس از حذف، نام دستگاه در گزارش‌های تاریخی نمایش داده نخواهد شد.";
+    }
+    if (!confirm(confirmMsg)) return;
     await DB.remove("devices", id);
     await DB.logActivity("حذف دستگاه", device.name);
     App.toast("دستگاه حذف شد");
@@ -240,7 +246,16 @@ const AdminPanel = (function () {
       App.toast("این نام کاربری قبلاً استفاده شده");
       return;
     }
-    await DB.add("users", { username, password, role, name });
+    let hashedPassword = await Auth.hashPassword(password);
+    try {
+      await DB.add("users", { username, password: hashedPassword, role, name });
+    } catch (e) {
+      if (e.name === "ConstraintError" || (e.message && e.message.includes("unique"))) {
+        App.toast("این نام کاربری قبلاً استفاده شده");
+        return;
+      }
+      throw e;
+    }
     await DB.logActivity("افزودن کاربر", username + " (" + (role === 'manager' ? 'مدیر' : 'ادمین') + ")");
     App.closeModalForce();
     App.toast("کاربر ذخیره شد");

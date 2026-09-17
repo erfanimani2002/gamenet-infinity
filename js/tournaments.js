@@ -1068,46 +1068,24 @@ const Tournaments = (function () {
     match.scoreA = scoreA;
     match.scoreB = scoreB;
 
-    if (scoreA > scoreB) {
-      match.winner = match.playerA;
-    } else if (scoreB > scoreA) {
-      match.winner = match.playerB;
-    } else {
+    let tournament = await DB.get("tournaments", match.tournamentId);
+
+    if (scoreA === scoreB) {
+      if (tournament && tournament.bracketType === "elimination") {
+        App.toast("نتیجه مساوی در حذفی مجاز نیست — لطفاً تایم‌بریکر بازی کنید");
+        return;
+      }
       match.winner = null;
+    } else if (scoreA > scoreB) {
+      match.winner = match.playerA;
+    } else {
+      match.winner = match.playerB;
     }
 
     match.status = "completed";
     await DB.put("matches", match);
 
-    if (oldWinner && !match.winner) {
-      let tournament = await DB.get("tournaments", match.tournamentId);
-      if (tournament && tournament.bracketType === "elimination") {
-        let allMatches;
-        try { allMatches = await DB.getByIndex("matches", "by_tournament", match.tournamentId); } catch (e) { allMatches = (await DB.getAll("matches")).filter((m) => m.tournamentId === match.tournamentId); }
-        let nextRound = match.round + 1;
-        let nextMatchIdx = Math.floor(match.matchIndex / 2);
-        let nextMatch = allMatches.find((m) => m.round === nextRound && m.matchIndex === nextMatchIdx && !m.isThirdPlace);
-        if (nextMatch) {
-          if (match.matchIndex % 2 === 0) {
-            nextMatch.playerA = null;
-          } else {
-            nextMatch.playerB = null;
-          }
-          await DB.put("matches", nextMatch);
-        }
-        let thirdPlaceMatch = allMatches.find((m) => m.round === nextRound && m.isThirdPlace);
-        if (thirdPlaceMatch) {
-          if (match.matchIndex % 2 === 0) {
-            thirdPlaceMatch.playerA = null;
-          } else {
-            thirdPlaceMatch.playerB = null;
-          }
-          await DB.put("matches", thirdPlaceMatch);
-        }
-      }
-    } else {
-      await advanceWinner(match);
-    }
+    await advanceWinner(match);
 
     App.toast("نتیجه ثبت شد");
     openMatch(matchId);

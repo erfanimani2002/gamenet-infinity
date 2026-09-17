@@ -1,11 +1,29 @@
 const Auth = (function () {
   let currentUser = null;
 
+  async function hashPassword(password) {
+    var encoder = new TextEncoder();
+    var data = encoder.encode(password);
+    var hashBuffer = await crypto.subtle.digest("SHA-256", data);
+    var hashArray = Array.from(new Uint8Array(hashBuffer));
+    return hashArray.map(function (b) { return b.toString(16).padStart(2, "0"); }).join("");
+  }
+
   async function login(username, password) {
-    let users = await DB.getAll("users");
-    let user = users.find(
-      (u) => u.username === username && u.password === password
-    );
+    var users = await DB.getAll("users");
+    var hashedInput = await hashPassword(password);
+    var user = null;
+    for (var i = 0; i < users.length; i++) {
+      var u = users[i];
+      if (u.username !== username) continue;
+      if (u.password === hashedInput) { user = u; break; }
+      if (u.password === password) {
+        user = u;
+        u.password = hashedInput;
+        await DB.put("users", u);
+        break;
+      }
+    }
     if (user) {
       currentUser = { id: user.id, username: user.username, role: user.role, name: user.name };
       sessionStorage.setItem("gnet_user", JSON.stringify(currentUser));
@@ -26,7 +44,7 @@ const Auth = (function () {
 
   function getSession() {
     if (currentUser) return currentUser;
-    let saved = sessionStorage.getItem("gnet_user");
+    var saved = sessionStorage.getItem("gnet_user");
     if (saved) {
       currentUser = JSON.parse(saved);
       return currentUser;
@@ -44,9 +62,7 @@ const Auth = (function () {
 
   function canAccess(feature) {
     if (isManager()) return true;
-    // Admin sees everything EXCEPT the manager-only destinations (monthlyReport,
-    // adminPanel) which app.js also gates by isManager().
-    const adminAllowed = [
+    var adminAllowed = [
       "consoles", "billiard", "pcs", "cafe", "customers", "customerClub", "debts",
       "inventory", "penalties", "purchases", "staff", "activityLog",
       "backup", "instantReport", "reports", "games", "tournaments",
@@ -54,5 +70,5 @@ const Auth = (function () {
     return adminAllowed.includes(feature);
   }
 
-  return { login, logout, getSession, isAdmin, isManager, canAccess };
+  return { login, logout, getSession, isAdmin, isManager, canAccess, hashPassword };
 })();

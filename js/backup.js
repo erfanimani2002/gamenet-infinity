@@ -1,9 +1,6 @@
 const Backup = (function () {
-  // Tracks the outcome of the automatic (every-10-minutes) backup so both the
-  // Backup tab and a persistent warning banner (see showBackupFailureWarning)
-  // can reflect it. In-memory only — resets on page reload, which is fine
-  // since writeAutoBackup() runs again shortly after every reload/login.
   let backupStatus = { lastSuccessAt: null, lastFailureAt: null, lastError: null, consecutiveFailures: 0 };
+  let backupInProgress = false;
 
   function renderAutoBackupStatus() {
     let failedMoreRecently = backupStatus.lastFailureAt &&
@@ -249,9 +246,14 @@ const Backup = (function () {
     try {
       let text = await file.text();
       let data = JSON.parse(text);
-      await DB.importAll(data);
+      let result = await DB.importAll(data);
       await DB.logActivity("بازیابی بک‌آپ", "بازیابی از فایل JSON");
-      App.toast("بازیابی با موفقیت انجام شد. صفحه را رفرش کنید.");
+      if (result && result.errors && result.errors.length > 0) {
+        App.toast("بازیابی انجام شد اما " + result.errors.length + " رکورد با خطا مواجه شد. جزئیات در کنسول.");
+        console.warn("Import errors:", result.errors);
+      } else {
+        App.toast("بازیابی با موفقیت انجام شد. صفحه را رفرش کنید.");
+      }
       setTimeout(() => location.reload(), 1500);
     } catch (e) {
       App.toast("خطا در بازیابی: " + e.message);
@@ -260,6 +262,8 @@ const Backup = (function () {
   }
 
   async function writeAutoBackup() {
+    if (backupInProgress) return;
+    backupInProgress = true;
     try {
       let data = await DB.exportAll();
       data._exportDate = new Date().toISOString();
@@ -285,6 +289,8 @@ const Backup = (function () {
       backupStatus.consecutiveFailures++;
       showBackupFailureWarning();
       refresh();
+    } finally {
+      backupInProgress = false;
     }
   }
 

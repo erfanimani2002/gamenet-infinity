@@ -1,6 +1,6 @@
 const DB = (function () {
   const DB_NAME = "GameNetInfinity";
-  const DB_VERSION = 6;
+  const DB_VERSION = 7;
   let db = null;
 
   const STORES = {
@@ -30,6 +30,7 @@ const DB = (function () {
   };
 
   const INDEXES = {
+    users: [{ name: "by_username", keyPath: "username", unique: true }],
     sessions: [
       { name: "by_device", keyPath: "deviceId" },
       { name: "by_status", keyPath: "status" },
@@ -99,7 +100,7 @@ const DB = (function () {
           if (INDEXES[storeName]) {
             INDEXES[storeName].forEach((idx) => {
               if (!store.indexNames.contains(idx.name)) {
-                store.createIndex(idx.name, idx.keyPath);
+                store.createIndex(idx.name, idx.keyPath, { unique: !!idx.unique });
               }
             });
           }
@@ -215,15 +216,11 @@ const DB = (function () {
 
   async function importAll(data) {
     await open();
-    // Clear EVERY store, not just the ones present in the backup file, so a
-    // store that's missing from an older backup (e.g. blockPayments or
-    // prizePayouts, introduced after the backup was taken) ends up empty rather
-    // than leaving stale pre-restore rows mixed in with the restored data. Only
-    // stores actually present in the file get repopulated afterward.
     let allStoreNames = Object.keys(STORES);
+    let allErrors = [];
     return new Promise((resolve, reject) => {
       let tx = db.transaction(allStoreNames, "readwrite");
-      tx.oncomplete = () => resolve();
+      tx.oncomplete = () => resolve({ ok: allErrors.length === 0, errors: allErrors });
       tx.onerror = () => reject(tx.error);
       allStoreNames.forEach((name) => {
         let store = tx.objectStore(name);
@@ -231,7 +228,10 @@ const DB = (function () {
         let items = data && data[name] || [];
         items.forEach((item) => {
           let req = store.add(item);
-          req.onerror = (e) => { e.preventDefault(); };
+          req.onerror = (e) => {
+            e.preventDefault();
+            allErrors.push({ store: name, id: item && item.id, error: e.target && e.target.error ? e.target.error.message : "unknown" });
+          };
         });
       });
     });
@@ -314,8 +314,16 @@ const DB = (function () {
     }
     let users = await getAll("users");
     if (users.length === 0) {
-      await add("users", { username: "admin", password: "admin", role: "admin", name: "ادمین" });
-      await add("users", { username: "manager", password: "manager", role: "manager", name: "مدیر" });
+      var encoder = new TextEncoder();
+      async function hashPw(pw) {
+        var data = encoder.encode(pw);
+        var hashBuffer = await crypto.subtle.digest("SHA-256", data);
+        return Array.from(new Uint8Array(hashBuffer)).map(function (b) { return b.toString(16).padStart(2, "0"); }).join("");
+      }
+      var adminHash = await hashPw("admin");
+      var managerHash = await hashPw("manager");
+      await add("users", { username: "admin", password: adminHash, role: "admin", name: "ادمین" });
+      await add("users", { username: "manager", password: managerHash, role: "manager", name: "مدیر" });
     }
   }
 

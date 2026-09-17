@@ -30,9 +30,24 @@ http.createServer((req, res) => {
   }
 
   if (req.method === "POST" && req.url === "/api/backup") {
+    const MAX_BODY_SIZE = 50 * 1024 * 1024;
     const chunks = [];
-    req.on("data", (c) => chunks.push(c));
+    let totalSize = 0;
+    let aborted = false;
+    req.on("data", (c) => {
+      if (aborted) return;
+      totalSize += c.length;
+      if (totalSize > MAX_BODY_SIZE) {
+        aborted = true;
+        req.destroy();
+        res.writeHead(413, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ ok: false, error: "payload too large" }));
+        return;
+      }
+      chunks.push(c);
+    });
     req.on("end", () => {
+      if (aborted) return;
       try {
         const body = Buffer.concat(chunks);
         let parsed;
