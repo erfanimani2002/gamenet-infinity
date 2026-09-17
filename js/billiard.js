@@ -471,16 +471,22 @@ const Billiard = (function () {
     let customers = await DB.getAll("customers");
     let devices = await DB.getAll("devices");
     let idsHtml = (session.ids || []).map((id) => Utils.renderCustomerId(id, customers)).join(", ");
+    let pricing = await DB.getSetting("pricing", {});
+    let liveBlockPrice = (b) => {
+      if (b.endTime) return b.price || 0;
+      let hours = (Date.now() - new Date(b.startTime).getTime()) / 3600000;
+      return Utils.roundPrice(hours * b.rate, pricing.roundingUnit || 1000);
+    };
     let blocksHtml = (session.timeBlocks || []).map((b, i) => {
       let dur = b.endTime ? Utils.formatDuration(new Date(b.endTime) - new Date(b.startTime)) : Utils.formatDuration(Date.now() - new Date(b.startTime).getTime()) + " (ادامه)";
       let blockDevice = b.deviceId ? devices.find((d) => d.id === b.deviceId) : null;
       let blockDeviceLabel = blockDevice ? " — " + blockDevice.name : "";
       let expectedPayerLabel = (b.endTime && b.expectedPayerName) ? " | انتظار: " + b.expectedPayerName : "";
-      return `<div class="block-item"><span>بلوک ${i + 1}${blockDeviceLabel}: ${Jalali.timeString(new Date(b.startTime))} - ${b.endTime ? Jalali.timeString(new Date(b.endTime)) : '...'} ${b.settled ? '(تسویه)' : ''}</span><span>${dur} | ${Utils.formatCurrency(b.price)}${expectedPayerLabel}</span></div>`;
+      return `<div class="block-item"><span>بلوک ${i + 1}${blockDeviceLabel}: ${Jalali.timeString(new Date(b.startTime))} - ${b.endTime ? Jalali.timeString(new Date(b.endTime)) : '...'} ${b.settled ? '(تسویه)' : ''}</span><span>${dur} | ${Utils.formatCurrency(liveBlockPrice(b))}${expectedPayerLabel}</span></div>`;
     }).join("");
     let itemsHtml = (session.items || []).map((it, i) => `<div class="block-item" style="align-items:center;"><span>${Utils.escapeHtml(it.name)} × ${it.qty}</span><span style="display:flex;align-items:center;gap:6px;"><button class="btn btn-sm btn-outline" onclick="Billiard.updateItemQty(${deviceId}, ${i}, -1)">−</button><span>${Utils.formatCurrency(it.price * it.qty)}</span><button class="btn btn-sm btn-outline" onclick="Billiard.updateItemQty(${deviceId}, ${i}, 1)">+</button><button class="btn btn-sm btn-outline" onclick="Billiard.removeItem(${deviceId}, ${i})">🗑</button></span></div>`).join("");
     let totalItems = (session.items || []).reduce((s, i) => s + (i.price * i.qty), 0);
-    let totalBlocks = (session.timeBlocks || []).reduce((s, b) => s + (b.price || 0), 0);
+    let totalBlocks = (session.timeBlocks || []).reduce((s, b) => s + liveBlockPrice(b), 0);
     let stickText = session.controllerCount === 4 ? "چهارچوب" : "دوچوب";
 
     App.openModal(`
