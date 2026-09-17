@@ -418,7 +418,17 @@ const Consoles = (function () {
     let session = sessions.find((s) => s.deviceId === deviceId && s.status === "active");
     if (!session) return;
 
-    let totalBlocks = session.timeBlocks.filter((b) => !b.settled).reduce((s, b) => s + (b.price || 0), 0);
+    // Preview-only projection of the currently-open block's price
+    let lastBlock = session.timeBlocks[session.timeBlocks.length - 1];
+    let projectedOpenBlockPrice = null;
+    if (lastBlock && !lastBlock.endTime) {
+      let projectedEndTime = new Date().toISOString();
+      let hours = (new Date(projectedEndTime) - new Date(lastBlock.startTime)) / 3600000;
+      let pricing = await DB.getSetting("pricing", {});
+      projectedOpenBlockPrice = Utils.roundPrice(hours * lastBlock.rate, pricing.roundingUnit || 1000);
+    }
+
+    let totalBlocks = session.timeBlocks.filter((b) => !b.settled).reduce((s, b) => s + (b === lastBlock ? (projectedOpenBlockPrice || 0) : (b.price || 0)), 0);
     let totalItems = (session.items || []).reduce((s, i) => s + (i.price * i.qty), 0);
     let total = totalBlocks + totalItems;
 
@@ -460,25 +470,13 @@ const Consoles = (function () {
     await Utils.guardDoubleClick(async () => {
       let payerId = parseInt(document.getElementById("payerId").value) || 0;
       let payType = document.getElementById("settlePayType").value;
-      if (payType === "combined") {
-        let cardAmt = parseInt(document.getElementById("combinedCardAmountSession").value) || 0;
-        let cashAmt = parseInt(document.getElementById("combinedCashAmountSession").value) || 0;
-        if (cardAmt + cashAmt !== finalAmount) { App.toast("مبلغ‌ها با کل مطابقت ندارد"); return { success: false }; }
-        payType = { card: cardAmt, cash: cashAmt };
-      }
       let settlerName = Utils.getSettlerName();
 
       let sessions = await DB.getAll("sessions");
       let session = sessions.find((s) => s.deviceId === deviceId && s.status === "active");
       if (!session) { App.toast("سشن یافت نشد"); return { success: false }; }
-      // Re-verify: session may have been settled by another tab between modal
-      // open and confirm.  Without this check the same session could be
-      // double-settled (double-charging the customer).
       if (session.status !== "active") { App.toast("این سشن قبلاً تسویه شده"); return { success: false }; }
 
-      // Recompute the payable amount from the CURRENT session instead of trusting
-      // the totals baked into the modal (which may have gone stale, e.g. after
-      // the 23:35 boundary or an extra item was added).
       let lastBlock = session.timeBlocks[session.timeBlocks.length - 1];
       if (lastBlock && !lastBlock.endTime) {
         lastBlock.endTime = new Date().toISOString();
@@ -497,8 +495,14 @@ const Consoles = (function () {
         let mainCustomer = await DB.get("customers", session.ids[0]);
         if (mainCustomer) discount = Math.round(gross * await Utils.getEffectiveDiscount(mainCustomer) / 100);
       }
-      // Floor at 0 so discount/credit items can never "credit" the wallet.
       let finalAmount = Math.max(0, gross - discount);
+
+      if (payType === "combined") {
+        let cardAmt = parseInt(document.getElementById("combinedCardAmountSession").value) || 0;
+        let cashAmt = parseInt(document.getElementById("combinedCashAmountSession").value) || 0;
+        if (cardAmt + cashAmt !== finalAmount) { App.toast("مبلغ‌ها با کل مطابقت ندارد"); return { success: false }; }
+        payType = { card: cardAmt, cash: cashAmt };
+      }
 
       let customer = await DB.get("customers", payerId);
       let payResult = Utils.computePaymentUpdate(customer, finalAmount, payType);
@@ -684,7 +688,7 @@ const Consoles = (function () {
         }
       }
 
-      if (delta < 0 && item.type === "cafe") {
+      if (delta < 0 && newQty > 0 && item.type === "cafe") {
         let cafeItem = item.itemId != null ? await DB.get("cafeItems", item.itemId) : null;
         if (cafeItem && !cafeItem.unlimited) {
           cafeItem.stock++;

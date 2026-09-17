@@ -1271,7 +1271,7 @@ const Tournaments = (function () {
       if (payType === "combined") {
         let cardAmt = parseInt(document.getElementById("matchCombinedCardAmount").value) || 0;
         let cashAmt = parseInt(document.getElementById("matchCombinedCashAmount").value) || 0;
-        if (cardAmt + cashAmt !== effectiveTotal) { App.toast("مبلغ‌ها با کل مطابقت ندارد"); return { success: false }; }
+        if (cardAmt + cashAmt !== total) { App.toast("مبلغ‌ها با کل مطابقت ندارد"); return { success: false }; }
         payType = { card: cardAmt, cash: cashAmt };
       }
       let settlerName = Utils.getSettlerName();
@@ -1327,16 +1327,22 @@ const Tournaments = (function () {
     let unsettled = matches.filter((m) => !m.settled && ((m.deviceCost || 0) > 0 || (m.items || []).length > 0));
     if (unsettled.length === 0) { App.toast("بازی تسویه‌نشده‌ای وجود ندارد"); return; }
 
+    let totalGrand = unsettled.reduce((s, m) => {
+      let totalItems = (m.items || []).reduce((a, i) => a + (i.price * i.qty), 0);
+      return s + (m.deviceCost || 0) + totalItems;
+    }, 0);
+
     App.openModal(`
       <h2>تسویه همه بازی‌ها</h2>
       <div class="list-row"><span class="row-label">تعداد بازی‌ها</span><span class="row-value">${unsettled.length}</span></div>
+      <div class="list-row"><span class="row-label">مجموع هزینه</span><span class="row-value">${Utils.formatCurrency(totalGrand)}</span></div>
       <div class="text-muted text-sm" style="margin-bottom:8px;">هزینه هر بازی از بازنده آن بازی دریافت می‌شود.</div>
       <div class="form-group"><label>روش پرداخت (برای همه بازی‌ها)</label>
-        <select id="bulkSettlePayType" onchange="Tournaments.toggleCombinedPayment('bulkSettlePayType', 'bulkCombinedFields', ${total})"><option value="cash">نقدی</option><option value="card">کارتی</option><option value="wallet">کیف‌پول</option><option value="debt">بدهکاری</option><option value="combined">ترکیبی (نقدی + کارتی)</option></select>
+        <select id="bulkSettlePayType" onchange="Tournaments.toggleCombinedPayment('bulkSettlePayType', 'bulkCombinedFields', ${totalGrand})"><option value="cash">نقدی</option><option value="card">کارتی</option><option value="wallet">کیف‌پول</option><option value="debt">بدهکاری</option><option value="combined">ترکیبی (نقدی + کارتی)</option></select>
       </div>
       <div id="bulkCombinedFields" style="display:none; margin-top:8px;">
-        <div class="form-group"><label>مبلغ کارتی</label><input type="number" id="bulkCombinedCardAmount" min="0" oninput="Tournaments.updateCombinedCheck('bulkCombinedCardAmount', 'bulkCombinedCashAmount', 'bulkCombinedCheck', ${total})"></div>
-        <div class="form-group"><label>مبلغ نقدی</label><input type="number" id="bulkCombinedCashAmount" min="0" oninput="Tournaments.updateCombinedCheck('bulkCombinedCardAmount', 'bulkCombinedCashAmount', 'bulkCombinedCheck', ${total})"></div>
+        <div class="form-group"><label>مبلغ کارتی</label><input type="number" id="bulkCombinedCardAmount" min="0" oninput="Tournaments.updateCombinedCheck('bulkCombinedCardAmount', 'bulkCombinedCashAmount', 'bulkCombinedCheck', ${totalGrand})"></div>
+        <div class="form-group"><label>مبلغ نقدی</label><input type="number" id="bulkCombinedCashAmount" min="0" oninput="Tournaments.updateCombinedCheck('bulkCombinedCardAmount', 'bulkCombinedCashAmount', 'bulkCombinedCheck', ${totalGrand})"></div>
         <div id="bulkCombinedCheck" class="text-sm" style="margin-top:4px;"></div>
       </div>
       <div class="modal-actions">

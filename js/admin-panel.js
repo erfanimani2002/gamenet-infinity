@@ -140,20 +140,21 @@ const AdminPanel = (function () {
   }
 
   async function savePricing() {
+    let v = (id, def) => { let n = parseInt(document.getElementById(id).value); return isNaN(n) ? def : n; };
     let pricing = {
       consoleRates: {
-        1: parseInt(document.getElementById("rate1").value) || 5000,
-        2: parseInt(document.getElementById("rate2").value) || 7000,
-        3: parseInt(document.getElementById("rate3").value) || 9000,
-        4: parseInt(document.getElementById("rate4").value) || 11000,
+        1: v("rate1", 5000),
+        2: v("rate2", 7000),
+        3: v("rate3", 9000),
+        4: v("rate4", 11000),
       },
       billiardRates: {
-        2: parseInt(document.getElementById("billiard2").value) || 8000,
-        4: parseInt(document.getElementById("billiard4").value) || 12000,
+        2: v("billiard2", 8000),
+        4: v("billiard4", 12000),
       },
-      pcRate: parseInt(document.getElementById("pcRate").value) || 3000,
-      roundingUnit: parseInt(document.getElementById("roundingUnit").value) || 1000,
-      overnightEntranceFee: parseInt(document.getElementById("overnightEntranceFee").value) || 0,
+      pcRate: v("pcRate", 3000),
+      roundingUnit: v("roundingUnit", 1000),
+      overnightEntranceFee: v("overnightEntranceFee", 0),
     };
     await DB.setSetting("pricing", pricing);
     await DB.logActivity("ذخیره قیمت‌ها", "نرخ‌ها به‌روزرسانی شد");
@@ -200,7 +201,8 @@ const AdminPanel = (function () {
 
   async function deleteDevice(id) {
     let device = await DB.get("devices", id);
-    if (device && device.status && device.status !== "free") {
+    if (!device) { App.toast("دستگاه یافت نشد"); return; }
+    if (device.status && device.status !== "free") {
       App.toast("این دستگاه سشن باز دارد — ابتدا سشن را لغو یا تسویه کنید");
       return;
     }

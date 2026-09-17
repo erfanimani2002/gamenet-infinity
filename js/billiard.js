@@ -391,24 +391,13 @@ const Billiard = (function () {
     await Utils.guardDoubleClick(async () => {
       let payerId = parseInt(document.getElementById("payerId").value) || 0;
       let payType = document.getElementById("settlePayType").value;
-      if (payType === "combined") {
-        let cardAmt = parseInt(document.getElementById("bCombinedCardAmountSession").value) || 0;
-        let cashAmt = parseInt(document.getElementById("bCombinedCashAmountSession").value) || 0;
-        let finalAmount = Math.max(0, gross - discount);
-        if (cardAmt + cashAmt !== finalAmount) { App.toast("مبلغ‌ها با کل مطابقت ندارد"); return { success: false }; }
-        payType = { card: cardAmt, cash: cashAmt };
-      }
       let settlerName = Utils.getSettlerName();
 
       let sessions = await DB.getAll("sessions");
       let session = sessions.find((s) => s.deviceId === deviceId && s.status === "active");
       if (!session) { App.toast("سشن یافت نشد"); return { success: false }; }
-      // Re-verify: session may have been settled by another tab between modal
-      // open and confirm.  Without this check the same session could be
-      // double-settled (double-charging the customer).
       if (session.status !== "active") { App.toast("این سشن قبلاً تسویه شده"); return { success: false }; }
 
-      // Recompute from the current session instead of trusting baked-in totals.
       let lastBlock = session.timeBlocks[session.timeBlocks.length - 1];
       if (lastBlock && !lastBlock.endTime) {
         lastBlock.endTime = new Date().toISOString();
@@ -428,6 +417,13 @@ const Billiard = (function () {
         if (mc) discount = Math.round(gross * await Utils.getEffectiveDiscount(mc) / 100);
       }
       let finalAmount = Math.max(0, gross - discount);
+
+      if (payType === "combined") {
+        let cardAmt = parseInt(document.getElementById("bCombinedCardAmountSession").value) || 0;
+        let cashAmt = parseInt(document.getElementById("bCombinedCashAmountSession").value) || 0;
+        if (cardAmt + cashAmt !== finalAmount) { App.toast("مبلغ‌ها با کل مطابقت ندارد"); return { success: false }; }
+        payType = { card: cardAmt, cash: cashAmt };
+      }
 
       let customer = await DB.get("customers", payerId);
       let payResult = Utils.computePaymentUpdate(customer, finalAmount, payType);
@@ -575,7 +571,7 @@ const Billiard = (function () {
         }
       }
 
-      if (delta < 0 && item.type === "cafe") {
+      if (delta < 0 && newQty > 0 && item.type === "cafe") {
         let cafeItem = item.itemId != null ? await DB.get("cafeItems", item.itemId) : null;
         if (cafeItem && !cafeItem.unlimited) {
           cafeItem.stock++;

@@ -465,7 +465,7 @@ const Overnight = (function () {
         }
       }
 
-      if (delta < 0 && item.type === "cafe" && item.itemId != null) {
+      if (delta < 0 && newQty > 0 && item.type === "cafe" && item.itemId != null) {
         let cafeItem = await DB.get("cafeItems", item.itemId);
         if (cafeItem && !cafeItem.unlimited) {
           await DB.put("cafeItems", { ...cafeItem, stock: cafeItem.stock + 1 });
@@ -820,6 +820,33 @@ const Overnight = (function () {
       }
     }
 
+    // Reverse any refunds (undo the wallet credit and totalPaid reduction)
+    for (let t of allTx) {
+      if (t.type !== "refund") continue;
+      let payerId = t.customerId || reservation.customerId;
+      if (!payerId) continue;
+      if (!customerChanges[payerId]) {
+        let c = await DB.get("customers", payerId);
+        if (c) customerChanges[payerId] = { ...c };
+      }
+      let c = customerChanges[payerId];
+      if (!c) continue;
+      let amount = t.amount || 0;
+      let payBreakdown = t.payBreakdown;
+      if (payBreakdown && typeof payBreakdown === "object") {
+        let w = payBreakdown.wallet || 0, d = payBreakdown.debt || 0, other = (payBreakdown.cash || 0) + (payBreakdown.card || 0);
+        if (w) { c.wallet = Math.max(0, (c.wallet || 0) - w); c.totalPaid = (c.totalPaid || 0) + w; }
+        if (d) { c.debt = (c.debt || 0) + d; }
+        if (other) { c.totalPaid = (c.totalPaid || 0) + other; }
+      } else if (t.payType === "wallet") {
+        c.wallet = Math.max(0, (c.wallet || 0) - amount); c.totalPaid = (c.totalPaid || 0) + amount;
+      } else if (t.payType === "debt") {
+        c.debt = (c.debt || 0) + amount;
+      } else {
+        c.totalPaid = (c.totalPaid || 0) + amount;
+      }
+    }
+
     let txRemovals = allTx.map((t) => ({ store: "overnightTransactions", type: "remove", data: t.id }));
     let ops = [
       ...Object.values(customerChanges).map((c) => ({ store: "customers", type: "put", data: c })),
@@ -920,9 +947,16 @@ const Overnight = (function () {
         categoryBreakdown.other = amount;
       }
 
-      let payType = method === "wallet" ? "wallet" : method === "debt" ? "debt" : method;
+      let payType = method === "wallet" ? "wallet" : method === "debt" ? "debt" : (typeof method === "object" ? "combined" : method);
       let payBreakdown = { wallet: 0, debt: 0, cash: 0, card: 0 };
-      payBreakdown[payType] = amount;
+      if (typeof method === "object") {
+        payBreakdown.wallet = method.wallet || 0;
+        payBreakdown.debt = method.debt || 0;
+        payBreakdown.cash = method.cash || 0;
+        payBreakdown.card = method.card || 0;
+      } else {
+        payBreakdown[payType] = amount;
+      }
 
       let tx = {
         reservationId: id, customerId: reservation.customerId, type: "refund",

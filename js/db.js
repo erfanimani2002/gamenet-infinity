@@ -229,7 +229,10 @@ const DB = (function () {
         let store = tx.objectStore(name);
         store.clear();
         let items = data && data[name] || [];
-        items.forEach((item) => { store.add(item); });
+        items.forEach((item) => {
+          let req = store.add(item);
+          req.onerror = (e) => { e.preventDefault(); };
+        });
       });
     });
   }

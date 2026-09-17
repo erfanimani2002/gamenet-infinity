@@ -38,7 +38,7 @@ const Penalties = (function () {
 
   async function saveItem() {
     let name = document.getElementById("penName").value.trim();
-    let amount = parseInt(document.getElementById("penAmount").value) || 0;
+    let amount = Math.round(parseFloat(document.getElementById("penAmount").value) || 0);
     let type = document.getElementById("penType").value;
     if (!name) { App.toast("نام الزامی است"); return; }
 
@@ -67,8 +67,9 @@ const Penalties = (function () {
 
   async function updateItem(id) {
     let item = await DB.get("penaltyItems", id);
+    if (!item) { App.toast("آیتم یافت نشد"); return; }
     item.name = document.getElementById("editPenName").value.trim();
-    item.amount = parseInt(document.getElementById("editPenAmount").value) || 0;
+    item.amount = Math.round(parseFloat(document.getElementById("editPenAmount").value) || 0);
     item.type = document.getElementById("editPenType").value;
     await DB.put("penaltyItems", item);
     await DB.logActivity("ویرایش آیتم جریمه/تخفیف", item.name + " (" + (item.type === 'penalty' ? 'جریمه' : 'تخفیف') + ")");

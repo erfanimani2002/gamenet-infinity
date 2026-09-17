@@ -37,7 +37,7 @@ const Debts = (function () {
 
   async function processPayment(id) {
     await Utils.guardDoubleClick(async () => {
-      let amount = parseInt(document.getElementById("debtPayAmount").value) || 0;
+      let amount = Math.round(parseFloat(document.getElementById("debtPayAmount").value) || 0);
       let payType = document.getElementById("debtPayType").value;
       if (amount <= 0) { App.toast("مبلغ نامعتبر"); return { success: false }; }
       let c = await DB.get("customers", id);

@@ -45,7 +45,7 @@ const Inventory = (function () {
 
   async function saveItem() {
     let name = document.getElementById("itemName").value.trim();
-    let price = parseInt(document.getElementById("itemPrice").value) || 0;
+    let price = Math.round(parseFloat(document.getElementById("itemPrice").value) || 0);
     let unlimited = document.getElementById("itemUnlimited").checked;
     let stock = unlimited ? -1 : (parseInt(document.getElementById("itemStock").value) || 0);
     if (!name) { App.toast("نام آیتم الزامی است"); return; }
@@ -97,7 +97,7 @@ const Inventory = (function () {
     let item = await DB.get("cafeItems", id);
     if (!item) { App.toast("آیتم یافت نشد"); return; }
     item.name = document.getElementById("editItemName").value.trim();
-    item.price = parseInt(document.getElementById("editItemPrice").value) || 0;
+    item.price = Math.round(parseFloat(document.getElementById("editItemPrice").value) || 0);
     item.unlimited = document.getElementById("editItemUnlimited").checked;
     item.stock = item.unlimited ? -1 : (parseInt(document.getElementById("editItemStock").value) || 0);
     await DB.put("cafeItems", item);

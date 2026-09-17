@@ -53,11 +53,15 @@ const Utils = (function () {
   }
 
   function formatCurrency(amount) {
-    return Number(amount).toLocaleString("fa-IR") + " تومان";
+    let n = Number(amount);
+    if (!Number.isFinite(n)) return "۰ تومان";
+    return n.toLocaleString("fa-IR") + " تومان";
   }
 
   function formatCurrencyShort(amount) {
-    return Number(amount).toLocaleString("fa-IR");
+    let n = Number(amount);
+    if (!Number.isFinite(n)) return "۰";
+    return n.toLocaleString("fa-IR");
   }
 
   function calculateTimeBlocksPrice(blocks, rate) {
@@ -122,7 +126,7 @@ const Utils = (function () {
   }
 
   function renderSelectLabel(list, value) {
-    if (!list || !value) return value;
+    if (!list || value == null) return value;
     let item = list.find((l) => l.value === value);
     return item ? item.label : value;
   }
@@ -138,6 +142,7 @@ const Utils = (function () {
   // ({ wallet, debt, cash, card }) so reversePayment can undo each leg exactly.
   function computePaymentUpdate(customer, amount, payType) {
     if (!customer) return { success: false, reason: "no_customer" };
+    if (!Number.isFinite(amount) || amount <= 0) return { success: false, reason: "invalid_amount" };
     let breakdown = { wallet: 0, debt: 0, cash: 0, card: 0 };
     let effective = payType;
     if (typeof payType === "object") {

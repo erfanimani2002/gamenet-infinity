@@ -99,6 +99,7 @@ const Reports = (function () {
     dailyPurchases.forEach((p) => {
       if (p.paymentType === "cash") purchaseCash += p.amount;
       else if (p.paymentType === "pasargad") purchaseCard += p.amount;
+      else if (p.paymentType === "other" && !p.settled) purchaseOther += p.amount;
       else if (p.paymentType !== "other") purchaseOther += p.amount;
     });
     purchases.filter((p) => p.paymentType === "other" && p.settled && p.settledWith && Utils.isInRange(p.settledAt, range.start, range.end)).forEach((p) => {

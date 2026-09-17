@@ -58,6 +58,8 @@ const App = (function () {
       if (user) {
         showApp(user);
       }
+    }).catch((err) => {
+      document.getElementById("loginError").textContent = "خطا در اتصال دیتابیس: " + (err.message || err);
     });
 
     document.getElementById("loginPass").addEventListener("keypress", (e) => {
@@ -154,7 +156,7 @@ const App = (function () {
   }
 
   document.addEventListener("visibilitychange", () => {
-    if (!document.hidden) {
+    if (!document.hidden && typeof Reports !== "undefined" && Reports.autoClosePastDays) {
       Reports.autoClosePastDays();
     }
   });

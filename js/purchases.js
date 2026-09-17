@@ -103,7 +103,7 @@ const Purchases = (function () {
   async function savePurchase() {
     let category = document.getElementById("purCategory").value;
     let description = document.getElementById("purDesc").value.trim();
-    let amount = parseInt(document.getElementById("purAmount").value) || 0;
+    let amount = Math.round(parseFloat(document.getElementById("purAmount").value) || 0);
     let payType = document.getElementById("purPayType").value;
     let thirdParty = document.getElementById("purThirdParty")?.value.trim() || "";
     if (amount <= 0) { App.toast("مبلغ نامعتبر"); return; }
@@ -135,6 +135,7 @@ const Purchases = (function () {
 
   async function confirmSettlePurchase(purchaseId) {
     let purchase = await DB.get("purchases", purchaseId);
+    if (!purchase) { App.toast("خرید یافت نشد"); return; }
     let settleWith = document.getElementById("settlePurchaseWith").value;
     purchase.settled = true;
     purchase.settledWith = settleWith;

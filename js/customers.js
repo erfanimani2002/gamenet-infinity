@@ -273,7 +273,7 @@ const Customers = (function () {
 
   async function doCharge(id) {
     await Utils.guardDoubleClick(async () => {
-      let amount = parseInt(document.getElementById("chargeAmount").value) || 0;
+      let amount = Math.round(parseFloat(document.getElementById("chargeAmount").value) || 0);
       let payType = document.getElementById("chargePayType").value;
       if (amount <= 0) {
         App.toast("مبلغ نامعتبر");
@@ -322,7 +322,7 @@ const Customers = (function () {
 
   async function doPayDebt(id) {
     await Utils.guardDoubleClick(async () => {
-      let amount = parseInt(document.getElementById("payAmount").value) || 0;
+      let amount = Math.round(parseFloat(document.getElementById("payAmount").value) || 0);
       let payType = document.getElementById("payType").value;
       if (amount <= 0) {
         App.toast("مبلغ نامعتبر");
@@ -388,8 +388,8 @@ const Customers = (function () {
     if (!c) { App.toast("مشتری یافت نشد"); return; }
     let oldWallet = c.wallet;
     let oldDebt = c.debt;
-    c.wallet = parseInt(document.getElementById("adjWallet").value) || 0;
-    c.debt = parseInt(document.getElementById("adjDebt").value) || 0;
+    c.wallet = Math.round(parseFloat(document.getElementById("adjWallet").value) || 0);
+    c.debt = Math.round(parseFloat(document.getElementById("adjDebt").value) || 0);
     await DB.put("customers", c);
     await DB.logActivity("اصلاح دستی", "ایدی #" + (c.displayId || c.id) + " - موجودی: " + oldWallet + "→" + c.wallet + " | بدهی: " + oldDebt + "→" + c.debt + " | دلیل: " + reason);
     App.toast("اصلاح ذخیره شد");

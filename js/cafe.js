@@ -82,6 +82,7 @@ const Cafe = (function () {
   }
 
   async function showNewOrder() {
+    selectedCustomerId = null;
     if (cart.length === 0) {
       App.toast("سبد خرید خالی است");
       return;
