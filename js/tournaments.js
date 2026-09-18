@@ -986,7 +986,6 @@ const Tournaments = (function () {
       // Free the device now that the match's timer has been settled/stopped,
       // the same way session-end frees a device — otherwise it would stay
       // stuck as busy forever after the match finishes.
-      let device = await DB.get("devices", match.deviceId);
       if (device && device.status === "tournament") {
         await DB.put("devices", { ...device, status: "free" });
       }
