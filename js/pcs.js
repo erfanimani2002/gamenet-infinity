@@ -757,9 +757,11 @@ const PCs = (function () {
     session.timeBlocks.push({ startTime: new Date().toISOString(), endTime: null, rate: newRate, controllerCount: newControllerCount, deviceType: targetDevice.type, deviceId: targetId, price: 0 });
 
     let oldDevice = await DB.get("devices", deviceId);
-    await DB.put("sessions", session);
-    await DB.put("devices", { ...oldDevice, status: "free" });
-    await DB.put("devices", { ...targetDevice, status: "busy" });
+    await DB.runAtomic([
+      { store: "sessions", type: "put", data: session },
+      { store: "devices", type: "put", data: { ...oldDevice, status: "free" } },
+      { store: "devices", type: "put", data: { ...targetDevice, status: "busy" } },
+    ]);
     await DB.logActivity("جابه‌جایی سشن پی‌سی", "سشن #" + session.id + " از " + oldDevice.name + " به " + targetDevice.name);
     App.stopTimer("timer-pc-" + deviceId);
     App.closeModalForce();

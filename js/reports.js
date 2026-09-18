@@ -961,7 +961,7 @@ const Reports = (function () {
           };
           let sum = session.settleBreakdown.console + session.settleBreakdown.billiard + session.settleBreakdown.pc;
           let diff = newAmount - sum;
-          if (diff !== 0) session.settleBreakdown.console += diff;
+          if (diff !== 0) session.settleBreakdown[session.deviceType] = (session.settleBreakdown[session.deviceType] || 0) + diff;
         }
         await DB.put("sessions", session);
       }
