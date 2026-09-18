@@ -91,7 +91,7 @@ const CustomerClub = (function () {
     let memberSince = c.createdAt ? Jalali.formatDate(new Date(c.createdAt)) : "—";
 
     return `
-      <div class="club-card" onclick="CustomerClub.openProfile(${c.id})">
+      <div class="club-card" data-search="${Utils.escapeHtml(((c.firstName || "") + " " + (c.lastName || "") + " " + (c.displayId || c.id)).toLowerCase())}" onclick="CustomerClub.openProfile(${c.id})">
         <div class="club-card-header">
           <div>
             <span class="club-card-name">${Utils.escapeHtml(c.firstName || "")} ${Utils.escapeHtml(c.lastName || "")}</span>
@@ -247,7 +247,13 @@ const CustomerClub = (function () {
     refresh();
   }
 
-  function onSearch(val) { currentSearch = val; refresh(); }
+  function onSearch(val) {
+    currentSearch = val;
+    let q = val.toLowerCase();
+    document.querySelectorAll(".club-card").forEach((card) => {
+      card.style.display = (card.dataset.search || "").includes(q) ? "" : "none";
+    });
+  }
   function onRankFilter(val) { currentRankFilter = val; refresh(); }
   function onInterestFilter(val) { currentInterestFilter = val; refresh(); }
   function onSort(val) { currentSort = val; refresh(); }
