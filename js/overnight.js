@@ -573,7 +573,7 @@ const Overnight = (function () {
 
       let customer = await DB.get("customers", reservation.customerId);
       let payResult = Utils.computePaymentUpdate(customer, amount, payType);
-      if (!payResult.success) { App.toast("پرداخت ناموفق بود"); return { success: false }; }
+      if (!payResult.success) { App.toast(payResult.reason === "insufficient_wallet" ? "موجودی کافی نیست" : "پرداخت ناموفق بود"); return { success: false }; }
 
       let tx = {
         reservationId: id, customerId: reservation.customerId, type: "payment",
@@ -658,7 +658,7 @@ const Overnight = (function () {
 
       let customer = await DB.get("customers", reservation.customerId);
       let payResult = Utils.computePaymentUpdate(customer, amount, payType);
-      if (!payResult.success) { App.toast("پرداخت ناموفق بود"); return { success: false }; }
+      if (!payResult.success) { App.toast(payResult.reason === "insufficient_wallet" ? "موجودی کافی نیست" : "پرداخت ناموفق بود"); return { success: false }; }
 
       let tx = {
         reservationId: id, customerId: reservation.customerId, type: "payment",

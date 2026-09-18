@@ -229,13 +229,14 @@ const Cafe = (function () {
         cafeItemMap[cartItem.id] = dbItem;
       }
 
-      // ONE WALLET RULE: computePaymentUpdate splits an insufficient wallet into
-      // wallet + debt legs and returns the effective payType + payBreakdown, so
-      // the order never records a fake "wallet" payType on top of hidden debt.
+      // ONE WALLET RULE: computePaymentUpdate rejects a "wallet" payment that
+      // exceeds the available balance (reason "insufficient_wallet") instead of
+      // silently spilling the shortfall into debt — the operator must pick a
+      // different method.
       let customer = await DB.get("customers", selectedCustomerId);
       if (!customer) { App.toast("مشتری یافت نشد"); return { success: false }; }
       let payResult = Utils.computePaymentUpdate(customer, total, payType);
-      if (!payResult.success) { App.toast("پرداخت ناموفق بود: " + payResult.reason); return { success: false }; }
+      if (!payResult.success) { App.toast(payResult.reason === "insufficient_wallet" ? "موجودی کافی نیست" : "پرداخت ناموفق بود"); return { success: false }; }
 
       let order = {
         customerId: selectedCustomerId,

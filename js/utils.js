@@ -135,10 +135,11 @@ const Utils = (function () {
   // DB.runAtomic. Returns { success, customer, payType, payBreakdown }.
   //
   // ONE WALLET RULE: a "wallet" payment that exceeds the available balance is
-  // SPLIT — the available wallet is applied as wallet, the remainder as debt —
-  // instead of being rejected (or, worse, silently spilled into debt while the
-  // record keeps a fake "wallet" payType). `payBreakdown` records every leg
-  // ({ wallet, debt, cash, card }) so reversePayment can undo each leg exactly.
+  // REJECTED with reason "insufficient_wallet" — the operator must explicitly
+  // choose a different method (debt, cash, card, or an explicit combined/split
+  // payment) rather than the app silently spilling the shortfall into debt.
+  // `payBreakdown` records every leg ({ wallet, debt, cash, card }) so
+  // reversePayment can undo each leg exactly.
   function computePaymentUpdate(customer, amount, payType) {
     if (!customer) return { success: false, reason: "no_customer" };
     if (!Number.isFinite(amount) || amount <= 0) return { success: false, reason: "invalid_amount" };
@@ -179,18 +180,10 @@ const Utils = (function () {
       }
     } else if (payType === "wallet") {
       let wallet = customer.wallet || 0;
-      if (wallet >= amount) {
-        breakdown.wallet = amount;
-        customer.wallet = wallet - amount;
-        customer.totalPaid = (customer.totalPaid || 0) + amount;
-      } else {
-        breakdown.wallet = wallet;
-        breakdown.debt = amount - wallet;
-        customer.wallet = 0;
-        customer.totalPaid = (customer.totalPaid || 0) + wallet;
-        customer.debt = (customer.debt || 0) + (amount - wallet);
-        effective = "split";
-      }
+      if (wallet < amount) return { success: false, reason: "insufficient_wallet" };
+      breakdown.wallet = amount;
+      customer.wallet = wallet - amount;
+      customer.totalPaid = (customer.totalPaid || 0) + amount;
     } else {
       // Unknown method: preserve old behaviour (treat as paid / cash leg).
       breakdown.cash = amount;

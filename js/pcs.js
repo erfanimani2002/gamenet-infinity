@@ -471,7 +471,7 @@ const PCs = (function () {
       let customer = await DB.get("customers", payerId);
       let payResult = Utils.computePaymentUpdate(customer, finalAmount, payType);
       if (!payResult.success) {
-        App.toast("پرداخت ناموفق بود");
+        App.toast(payResult.reason === "insufficient_wallet" ? "موجودی کافی نیست" : "پرداخت ناموفق بود");
         return { success: false };
       }
 
