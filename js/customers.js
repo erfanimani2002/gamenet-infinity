@@ -8,7 +8,7 @@ const Customers = (function () {
           <button class="btn btn-primary" onclick="Customers.showAddCustomer()">+ شناسه جدید</button>
         </div>
         <div class="search-box">
-          <input type="text" id="customerSearch" placeholder="جستجو بر اساس شماره ایدی..." oninput="Customers.filterList()">
+          <input type="text" id="customerSearch" placeholder="جستجو بر اساس شماره ایدی یا نام..." oninput="Customers.filterList()">
         </div>
         <div id="customerList">
           ${renderCustomerList(customers)}
@@ -22,9 +22,13 @@ const Customers = (function () {
     if (customers.length === 0) {
       return '<div class="empty-state"><div class="empty-icon">' + (typeof Icons !== "undefined" ? Icons.get("customers", 40) : "") + '</div>هنوز شناسه‌ای ثبت نشده</div>';
     }
-    return customers.map((c) => `
-      <div class="list-row" data-search="${String(c.displayId || c.id).toLowerCase()}">
+    return customers.map((c) => {
+      let fullName = ((c.firstName || "") + " " + (c.lastName || "")).trim();
+      let searchKey = (String(c.displayId || c.id) + " " + fullName).toLowerCase();
+      return `
+      <div class="list-row" data-search="${Utils.escapeHtml(searchKey)}">
         <span class="row-label">#${c.displayId || c.id}</span>
+        <span class="row-value" style="min-width:120px">${Utils.escapeHtml(fullName) || '<span class="text-muted">—</span>'}</span>
         <span class="row-value" style="min-width:80px">
           <span class="amount ${c.wallet > 0 ? 'positive' : ''}">${Utils.formatCurrencyShort(c.wallet)}</span>
         </span>
@@ -38,7 +42,8 @@ const Customers = (function () {
           <button class="btn btn-outline btn-sm" onclick="Customers.showManualAdjust(${c.id})">اصلاح</button>
         </span>
       </div>
-    `).join("");
+    `;
+    }).join("");
   }
 
   function filterList() {
