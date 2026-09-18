@@ -382,6 +382,230 @@ const Utils = (function () {
     return result;
   }
 
+  // ── Time Picker — inline wheel editor ───────────────────────────────
+  //
+  // Usage in module modal HTML:
+  //   ${Utils.renderStartTimePicker("sStartTime")}
+  //   Utils.initTimePicker("sStartTime");
+  //
+  // Read the selected time later:
+  //   Utils.getSelectedStartTime("sStartTime") → Date | null
+
+  function renderStartTimePicker(inputId) {
+    return `
+      <div class="time-picker" id="tp_${inputId}">
+        <div class="tp-chips">
+          <button type="button" class="tp-chip active" data-offset="0" onclick="Utils._tpPick('${inputId}',this)">الان</button>
+          <button type="button" class="tp-chip" data-offset="-15" onclick="Utils._tpPick('${inputId}',this)">۱۵ دقیقه پیش</button>
+          <button type="button" class="tp-chip" data-offset="-30" onclick="Utils._tpPick('${inputId}',this)">۳۰ دقیقه پیش</button>
+          <button type="button" class="tp-chip" data-offset="-60" onclick="Utils._tpPick('${inputId}',this)">۱ ساعت پیش</button>
+        </div>
+        <div class="tp-wheel-section">
+          <div class="tp-wheel-col">
+            <div class="tp-wheel-label">دقیقه</div>
+            <div class="tp-wheel-container" id="tp_wmc_${inputId}">
+              <div class="tp-wheel" id="tp_wm_${inputId}"></div>
+              <div class="tp-highlight"></div>
+              <button type="button" class="tp-btn-up" onclick="Utils._tpScrollWheel('tp_wm_${inputId}',-1)">▲</button>
+              <button type="button" class="tp-btn-down" onclick="Utils._tpScrollWheel('tp_wm_${inputId}',1)">▼</button>
+            </div>
+          </div>
+          <div class="tp-sep">:</div>
+          <div class="tp-wheel-col">
+            <div class="tp-wheel-label">ساعت</div>
+            <div class="tp-wheel-container" id="tp_whc_${inputId}">
+              <div class="tp-wheel" id="tp_wh_${inputId}"></div>
+              <div class="tp-highlight"></div>
+              <button type="button" class="tp-btn-up" onclick="Utils._tpScrollWheel('tp_wh_${inputId}',-1)">▲</button>
+              <button type="button" class="tp-btn-down" onclick="Utils._tpScrollWheel('tp_wh_${inputId}',1)">▼</button>
+            </div>
+          </div>
+        </div>
+        <div class="tp-preview" id="tp_pv_${inputId}"></div>
+        <input type="hidden" id="${inputId}">
+      </div>`;
+  }
+
+  function initTimePicker(inputId) {
+    let now = new Date();
+    _tpBuildWheel("tp_wm_" + inputId, 60, now.getMinutes(), inputId);
+    _tpBuildWheel("tp_wh_" + inputId, 24, now.getHours(), inputId);
+    _tpWriteValue(inputId, now.getHours(), now.getMinutes());
+  }
+
+  function _tpBuildWheel(wheelId, count, initial, inputId) {
+    let el = document.getElementById(wheelId);
+    if (!el) return;
+    el.innerHTML = "";
+    for (let i = 0; i < count; i++) {
+      let item = document.createElement("div");
+      item.className = "tp-wheel-item";
+      item.dataset.val = i;
+      item.textContent = String(i).padStart(2, "0");
+      item.addEventListener("click", function () {
+        let cur = parseInt(el.dataset.current) || 0;
+        if (i === cur) {
+          _tpOpenWheelEditor(wheelId, inputId);
+        } else {
+          _tpSnapWheel(el, i, inputId);
+        }
+      });
+      el.appendChild(item);
+    }
+    requestAnimationFrame(function () {
+      _tpSnapWheel(el, initial, inputId, true);
+    });
+    let container = el.parentElement;
+    if (container && !container._tpWheelBound) {
+      container.addEventListener("wheel", function (e) {
+        e.preventDefault();
+        let cur = parseInt(el.dataset.current) || 0;
+        let max = el.children.length - 1;
+        let dir = e.deltaY > 0 ? 1 : -1;
+        let next = Math.max(0, Math.min(max, cur + dir));
+        _tpSnapWheel(el, next, inputId);
+      }, { passive: false });
+      let overlay = document.createElement("div");
+      overlay.className = "tp-wheel-overlay";
+      let inp = document.createElement("input");
+      inp.type = "text";
+      inp.maxLength = 2;
+      inp.autocomplete = "off";
+      inp.addEventListener("input", function () {
+        let v = parseInt(inp.value) || 0;
+        let max = count - 1;
+        v = Math.max(0, Math.min(max, v));
+        _tpSnapWheel(el, v, inputId, true);
+        _tpSyncFromWheels(inputId);
+      });
+      inp.addEventListener("keydown", function (e) {
+        if (e.key === "Enter") { e.preventDefault(); _tpCloseWheelEditor(wheelId); }
+        if (e.key === "Escape") { e.preventDefault(); _tpCloseWheelEditor(wheelId, true); }
+      });
+      inp.addEventListener("blur", function () {
+        _tpCloseWheelEditor(wheelId);
+      });
+      overlay.appendChild(inp);
+      container.appendChild(overlay);
+      container._tpWheelBound = true;
+    }
+  }
+
+  function _tpOpenWheelEditor(wheelId, inputId) {
+    let el = document.getElementById(wheelId);
+    if (!el) return;
+    let container = el.parentElement;
+    let overlay = container ? container.querySelector(".tp-wheel-overlay") : null;
+    let inp = overlay ? overlay.querySelector("input") : null;
+    if (!overlay || !inp) return;
+    let cur = parseInt(el.dataset.current) || 0;
+    inp.value = cur;
+    overlay.style.display = "block";
+    inp.focus();
+    inp.select();
+  }
+
+  function _tpCloseWheelEditor(wheelId, revert) {
+    let el = document.getElementById(wheelId);
+    if (!el) return;
+    let container = el.parentElement;
+    let overlay = container ? container.querySelector(".tp-wheel-overlay") : null;
+    let inp = overlay ? overlay.querySelector("input") : null;
+    if (!overlay || !inp) return;
+    if (revert) {
+      let cur = parseInt(el.dataset.current) || 0;
+      inp.value = cur;
+    }
+    overlay.style.display = "none";
+  }
+
+  function _tpSnapWheel(el, target, inputId, instant) {
+    let items = el.querySelectorAll(".tp-wheel-item");
+    if (!items.length) return;
+    let itemH = items[0].offsetHeight;
+    let containerH = el.parentElement.offsetHeight;
+    let pad = containerH / 2 - itemH / 2;
+    let scrollTo = target * itemH;
+    el.style.transition = instant ? "none" : "transform .28s cubic-bezier(.25,.1,.25,1)";
+    el.style.transform = "translateY(" + (pad - scrollTo) + "px)";
+    items.forEach(function (it, idx) {
+      it.classList.toggle("active", idx === target);
+    });
+    el.dataset.current = target;
+    if (!instant) {
+      let inputIdClean = el.id.replace("tp_wh_", "").replace("tp_wm_", "");
+      _tpSyncFromWheels(inputIdClean);
+    }
+  }
+
+  function _tpScrollWheel(wheelId, dir) {
+    let el = document.getElementById(wheelId);
+    if (!el) return;
+    let cur = parseInt(el.dataset.current) || 0;
+    let max = el.children.length - 1;
+    let next = Math.max(0, Math.min(max, cur + dir));
+    let inputId = el.id.replace("tp_wh_", "").replace("tp_wm_", "");
+    _tpSnapWheel(el, next, inputId);
+  }
+
+  function _tpSyncFromWheels(inputId) {
+    let wh = document.getElementById("tp_wh_" + inputId);
+    let wm = document.getElementById("tp_wm_" + inputId);
+    let h = wh ? parseInt(wh.dataset.current) || 0 : 0;
+    let m = wm ? parseInt(wm.dataset.current) || 0 : 0;
+    _tpWriteValue(inputId, h, m);
+  }
+
+  function _tpWriteValue(inputId, h, m) {
+    let hidden = document.getElementById(inputId);
+    if (hidden) hidden.value = String(h).padStart(2, "0") + ":" + String(m).padStart(2, "0");
+
+    let pv = document.getElementById("tp_pv_" + inputId);
+    if (pv) {
+      let now = new Date();
+      let sel = new Date(now);
+      sel.setHours(h, m, 0, 0);
+      let diffMin = Math.round((now - sel) / 60000);
+      let ago = "";
+      if (diffMin > 0 && diffMin < 720) {
+        if (diffMin < 60) ago = " — " + diffMin + " دقیقه پیش";
+        else ago = " — " + Math.floor(diffMin / 60) + " ساعت و " + (diffMin % 60) + " دقیقه پیش";
+      }
+      pv.textContent = "انتخاب: " + String(h).padStart(2, "0") + ":" + String(m).padStart(2, "0") + ago;
+    }
+  }
+
+  function _tpPick(inputId, chipEl) {
+    let container = document.getElementById("tp_" + inputId);
+    if (!container) return;
+    container.querySelectorAll(".tp-chip").forEach(function (c) { c.classList.remove("active"); });
+    chipEl.classList.add("active");
+
+    let offset = parseInt(chipEl.dataset.offset) || 0;
+    let now = new Date();
+    now.setMinutes(now.getMinutes() + offset);
+    let h = now.getHours();
+    let m = now.getMinutes();
+    let wh = document.getElementById("tp_wh_" + inputId);
+    let wm = document.getElementById("tp_wm_" + inputId);
+    if (wh) _tpSnapWheel(wh, h, inputId, true);
+    if (wm) _tpSnapWheel(wm, m, inputId, true);
+    _tpWriteValue(inputId, h, m);
+  }
+
+  function getSelectedStartTime(inputId) {
+    let hidden = document.getElementById(inputId);
+    if (!hidden || !hidden.value) return null;
+    let parts = hidden.value.split(":");
+    let h = parseInt(parts[0]);
+    let m = parseInt(parts[1]);
+    let now = new Date();
+    let d = new Date(now);
+    d.setHours(h, m, 0, 0);
+    if (d > now) d.setDate(d.getDate() - 1);
+    return d;
+  }
+
   return {
     getReportRange, getCurrentReportRange, getBusinessDayKey, roundPrice, generateId,
     splitLegsByCategory,
@@ -392,6 +616,8 @@ const Utils = (function () {
     getJalaliWeekday, resolveTransferRate, renderPayerSelect, filterPayerSelect,
     getEffectiveDiscount,
     skeletonDeviceList, skeletonCard, debounce,
+    renderStartTimePicker, initTimePicker, getSelectedStartTime,
+    _tpPick, _tpScrollWheel, _tpOpenWheelEditor, _tpCloseWheelEditor,
   };
 
   function skeletonDeviceList(count) {

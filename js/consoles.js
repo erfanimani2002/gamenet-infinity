@@ -144,7 +144,7 @@ const Consoles = (function () {
       </div>
       <div class="form-group">
         <label>زمان شروع (اختیاری)</label>
-        <input type="time" id="sStartTime">
+        ${Utils.renderStartTimePicker("sStartTime")}
       </div>
       <div class="modal-actions">
         <button class="btn btn-primary" onclick="Consoles.confirmStartSession(${deviceId})">شروع</button>
@@ -152,6 +152,7 @@ const Consoles = (function () {
       </div>
     `);
     updateSelectedIds();
+    Utils.initTimePicker("sStartTime");
   }
 
   function quickCreateCustomer(deviceId) {
@@ -192,17 +193,6 @@ const Consoles = (function () {
     }).join("");
   }
 
-  function parseTimeInput(timeInput) {
-    let now = new Date();
-    let parts = timeInput.split(":");
-    let h = parseInt(parts[0]);
-    let m = parseInt(parts[1]);
-    let d = new Date(now);
-    d.setHours(h, m, 0, 0);
-    if (d > now) d.setDate(d.getDate() - 1);
-    return d;
-  }
-
   async function confirmStartSession(deviceId) {
     return Utils.guardDoubleClick(async () => {
       if (selectedIds.length === 0) { App.toast("حداقل یک شناسه انتخاب کنید"); return { success: false }; }
@@ -217,10 +207,8 @@ const Consoles = (function () {
       let rate = rates[controllerCount] || rates[1] || 5000;
 
       let startTime = new Date();
-      let timeInput = document.getElementById("sStartTime").value;
-      if (timeInput) {
-        startTime = parseTimeInput(timeInput);
-      }
+      let pickedStart = Utils.getSelectedStartTime("sStartTime");
+      if (pickedStart) startTime = pickedStart;
 
       let session = {
         deviceId, deviceType: "console", ids: [...selectedIds], controllerCount,

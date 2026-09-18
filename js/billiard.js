@@ -114,13 +114,14 @@ const Billiard = (function () {
       </div>
       <div class="form-group"><label>انتخاب شده</label><div id="bSelectedIds" class="text-muted text-sm">هیچ شناسه‌ای</div></div>
       <div class="form-group"><label>تعداد چوب</label><select id="bStickCount"><option value="2">دوچوب</option><option value="4">چهارچوب</option></select></div>
-      <div class="form-group"><label>زمان شروع (اختیاری)</label><input type="time" id="bStartTime"></div>
+      <div class="form-group"><label>زمان شروع (اختیاری)</label>${Utils.renderStartTimePicker("bStartTime")}</div>
       <div class="modal-actions">
         <button class="btn btn-primary" onclick="Billiard.confirmStartSession(${deviceId})">شروع</button>
         <button class="btn btn-outline" onclick="App.closeModalForce()">انصراف</button>
       </div>
     `);
     updateSelectedIds();
+    Utils.initTimePicker("bStartTime");
   }
 
   function quickCreateCustomer(deviceId) {
@@ -135,17 +136,6 @@ const Billiard = (function () {
   function removeSelectedId(id) { selectedIds = selectedIds.filter((i) => i !== id); updateSelectedIds(); }
   async function updateSelectedIds() { let el = document.getElementById("bSelectedIds"); if (!el) return; if (selectedIds.length === 0) { el.innerHTML = '<span class="text-muted">هیچ شناسه‌ای</span>'; return; } let customers = await DB.getAll("customers"); el.innerHTML = selectedIds.map((id) => { let label = Utils.renderCustomerId(id, customers); return `<span class="status-badge" style="margin:2px;">${label} <button onclick="Billiard.removeSelectedId(${id})" style="background:none;border:none;cursor:pointer;color:red;">×</button></span>`; }).join(""); }
 
-  function parseTimeInput(timeInput) {
-    let now = new Date();
-    let parts = timeInput.split(":");
-    let h = parseInt(parts[0]);
-    let m = parseInt(parts[1]);
-    let d = new Date(now);
-    d.setHours(h, m, 0, 0);
-    if (d > now) d.setDate(d.getDate() - 1);
-    return d;
-  }
-
   async function confirmStartSession(deviceId) {
     return Utils.guardDoubleClick(async () => {
       if (selectedIds.length === 0) { App.toast("حداقل یک شناسه"); return { success: false }; }
@@ -158,8 +148,8 @@ const Billiard = (function () {
       let pricing = await DB.getSetting("pricing", {});
       let rate = (pricing.billiardRates || {})[stickCount] || 8000;
       let startTime = new Date();
-      let timeInput = document.getElementById("bStartTime").value;
-      if (timeInput) { startTime = parseTimeInput(timeInput); }
+      let pickedStart = Utils.getSelectedStartTime("bStartTime");
+      if (pickedStart) startTime = pickedStart;
 
       let session = { deviceId, deviceType: "billiard", ids: [...selectedIds], controllerCount: stickCount, timeBlocks: [{ startTime: startTime.toISOString(), endTime: null, rate, controllerCount: stickCount, deviceType: "billiard", deviceId, price: 0 }], items: [], status: "active", createdAt: startTime.toISOString() };
       await DB.add("sessions", session);

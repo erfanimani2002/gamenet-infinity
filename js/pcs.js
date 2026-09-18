@@ -132,7 +132,7 @@ const PCs = (function () {
       </div>
       <div class="form-group">
         <label>زمان شروع (اختیاری)</label>
-        <input type="time" id="pcStartTime">
+        ${Utils.renderStartTimePicker("pcStartTime")}
       </div>
       <div class="modal-actions">
         <button class="btn btn-success" onclick="PCs.confirmTurnOn(${deviceId})">روشن شود</button>
@@ -140,6 +140,7 @@ const PCs = (function () {
       </div>
     `);
     updateSelectedIds();
+    Utils.initTimePicker("pcStartTime");
   }
 
   function quickCreateCustomer(deviceId) {
@@ -175,17 +176,6 @@ const PCs = (function () {
     }
   }
 
-  function parseTimeInput(timeInput) {
-    let now = new Date();
-    let parts = timeInput.split(":");
-    let h = parseInt(parts[0]);
-    let m = parseInt(parts[1]);
-    let d = new Date(now);
-    d.setHours(h, m, 0, 0);
-    if (d > now) d.setDate(d.getDate() - 1);
-    return d;
-  }
-
   async function confirmTurnOn(deviceId) {
     return Utils.guardDoubleClick(async () => {
       if (selectedIds.length === 0) { App.toast("شناسه را انتخاب کنید"); return { success: false }; }
@@ -199,10 +189,8 @@ const PCs = (function () {
       let rate = pricing.pcRate || 3000;
 
       let startTime = new Date();
-      let timeInput = document.getElementById("pcStartTime").value;
-      if (timeInput) {
-        startTime = parseTimeInput(timeInput);
-      }
+      let pickedStart = Utils.getSelectedStartTime("pcStartTime");
+      if (pickedStart) startTime = pickedStart;
 
       let session = {
         deviceId, deviceType: "pc", ids: [...selectedIds], controllerCount: 1,
