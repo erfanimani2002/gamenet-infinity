@@ -47,6 +47,7 @@ const Debts = (function () {
       // not insert a 0-amount debtPayments row.
       if (amount <= 0) { App.toast("بدهی برای پرداخت وجود ندارد"); return { success: false }; }
       c.debt -= amount;
+      c.totalPaid = (c.totalPaid || 0) + amount;
       await DB.runAtomic([
         { store: "customers", type: "put", data: c },
         { store: "debtPayments", type: "add", data: { customerId: id, amount, paymentType: payType, date: new Date().toISOString() } },

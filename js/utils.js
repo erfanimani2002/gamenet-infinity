@@ -370,15 +370,21 @@ const Utils = (function () {
   function splitLegsByCategory(overallLegs, categoryBreakdown, categories) {
     let result = {};
     let cb = categoryBreakdown || {};
+    let legs = ["cash", "card", "wallet", "debt"];
     let sum = categories.reduce((s, cat) => s + (cb[cat] || 0), 0);
     categories.forEach((cat) => {
       let frac = sum > 0 ? (cb[cat] || 0) / sum : (cat === categories[categories.length - 1] ? 1 : 0);
-      result[cat] = {
-        cash: Math.round((overallLegs.cash || 0) * frac),
-        card: Math.round((overallLegs.card || 0) * frac),
-        wallet: Math.round((overallLegs.wallet || 0) * frac),
-        debt: Math.round((overallLegs.debt || 0) * frac),
-      };
+      result[cat] = {};
+      legs.forEach((leg) => { result[cat][leg] = Math.round((overallLegs[leg] || 0) * frac); });
+    });
+    // Rounding each category's share independently can make the per-category
+    // sum differ from the original leg total; put the remainder on the
+    // category with the largest share so the sums always match exactly.
+    let target = categories.reduce((best, cat) => ((cb[cat] || 0) > (cb[best] || 0) ? cat : best), categories[categories.length - 1]);
+    legs.forEach((leg) => {
+      let total = overallLegs[leg] || 0;
+      let assigned = categories.reduce((s, cat) => s + result[cat][leg], 0);
+      result[target][leg] += total - assigned;
     });
     return result;
   }

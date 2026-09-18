@@ -256,15 +256,20 @@ const Tournaments = (function () {
       }
     }
 
-    // Reverse prize payouts and delete their rows. A wallet payout is credited
-    // back by subtracting the wallet (floored at 0); cash/card payouts only have
-    // their row removed — we do NOT fabricate cash back into the till.
+    // Remove prize payout rows and the matching prize expense records from purchases.
+    // Prize payouts are cash / pasargad / other only; no wallet or till adjustment is made.
     let prizePayouts = (await DB.getAll("prizePayouts")).filter((p) => p.tournamentId === id);
+    let purchases = await DB.getAll("purchases");
     for (let p of prizePayouts) {
-      // Remove associated purchase record if it exists
-      let purchases = await DB.getAll("purchases");
-      let purchase = purchases.find((pur) => pur.note && pur.note.includes(t.name || "") && pur.amount === p.amount);
-      if (purchase) await DB.remove("purchases", purchase.id);
+      let purchase = purchases.find((pur) =>
+        pur.category === "tournament_prize" &&
+        (pur.tournamentId != null
+          ? pur.tournamentId === id && pur.place === p.place
+          : pur.description && pur.description.includes(t.name || "") && pur.amount === p.amount));
+      if (purchase) {
+        await DB.remove("purchases", purchase.id);
+        purchases = purchases.filter((x) => x.id !== purchase.id);
+      }
       await DB.remove("prizePayouts", p.id);
     }
 
@@ -1468,6 +1473,8 @@ const Tournaments = (function () {
       let payoutRecord = { tournamentId, place, customerId: winnerId, amount: prize.amount, payType, date: new Date().toISOString() };
       let purchaseRecord = {
         category: "tournament_prize",
+        tournamentId,
+        place,
         description: "جایزه مسابقه: " + t.name + " — " + prizeLabel + " — برنده: " + winnerName,
         amount: prize.amount,
         paymentType: payType,

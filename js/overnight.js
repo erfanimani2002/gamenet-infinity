@@ -675,12 +675,16 @@ const Overnight = (function () {
         { store: "overnightReservations", type: "put", data: reservation },
       ];
 
-      // If payment is less than remaining balance, create a writeoff for the unpaid portion
-      let remainingAfter = (reservation.totalCharges || 0) - amount;
+      // If payment is less than the remaining balance, write off the unpaid portion
+      let remainingAfter = totals.remainingBalance - amount;
       if (remainingAfter > 0) {
+        let woBreakdown = { entrance: 0, items: 0, other: 0 };
+        CATEGORIES.forEach((c) => {
+          woBreakdown[c] = Math.max(0, totals.remaining[c] - categoryBreakdown[c]);
+        });
         ops.push({ store: "overnightTransactions", type: "add", data: {
           reservationId: id, customerId: reservation.customerId, type: "writeoff",
-          amount: remainingAfter, payType: "writeoff", categoryBreakdown: {},
+          amount: remainingAfter, categoryBreakdown: woBreakdown,
           settlerName, timestamp: new Date().toISOString(), status: "active",
         } });
       }
