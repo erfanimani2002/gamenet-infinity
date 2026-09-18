@@ -392,7 +392,7 @@ const PCs = (function () {
       projectedOpenBlockPrice = Utils.roundPrice(hours * lastBlock.rate, pricing.roundingUnit || 1000);
     }
 
-    let totalBlocks = session.timeBlocks.filter((b) => !b.settled).reduce((s, b) => s + (b === lastBlock ? (projectedOpenBlockPrice || 0) : (b.price || 0)), 0);
+    let totalBlocks = session.timeBlocks.filter((b) => !b.settled).reduce((s, b) => s + (!b.endTime ? (projectedOpenBlockPrice || 0) : (b.price || 0)), 0);
     let totalItems = (session.items || []).reduce((s, i) => s + (i.price * i.qty), 0);
     // Discount only applies to time cost, never to items — and rounding is
     // applied AFTER the discount is subtracted (not before), so the customer's
@@ -401,7 +401,7 @@ const PCs = (function () {
     let discountPct = 0;
     if (session.ids && session.ids.length > 0) {
       let mainCustomer = await DB.get("customers", session.ids[0]);
-      if (mainCustomer) discountPct = await Utils.getEffectiveDiscount(mainCustomer);
+      if (mainCustomer) discountPct = Number(await Utils.getEffectiveDiscount(mainCustomer)) || 0;
     }
     let discountedTime = Utils.roundPrice(Math.max(0, totalBlocks - Math.round(totalBlocks * discountPct / 100)), pricingPreview.roundingUnit || 1000);
     let discount = totalBlocks - discountedTime;
@@ -465,7 +465,7 @@ const PCs = (function () {
       let discountPct = 0;
       if (session.ids && session.ids.length > 0) {
         let mainCustomer = await DB.get("customers", session.ids[0]);
-        if (mainCustomer) discountPct = await Utils.getEffectiveDiscount(mainCustomer);
+        if (mainCustomer) discountPct = Number(await Utils.getEffectiveDiscount(mainCustomer)) || 0;
       }
       let discountedTime = Utils.roundPrice(Math.max(0, blockTotal - Math.round(blockTotal * discountPct / 100)), pricingForDiscount.roundingUnit || 1000);
       let discount = blockTotal - discountedTime;
