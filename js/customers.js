@@ -434,8 +434,10 @@ const Customers = (function () {
   // Opens a tiny inline prompt to create a customer on the fly (e.g. from a
   // session/order start screen where the customer doesn't have an ID yet).
   // Calls onCreated({id, displayId}) once the new customer is saved.
+  let _quickCreateCallback = null;
+
   function promptQuickCreate(onCreated) {
-    window.__quickCreateCallback = onCreated;
+    _quickCreateCallback = onCreated;
     App.openModal(`
       <h2>مشتری جدید سریع</h2>
       <div class="form-group"><label>نام</label><input type="text" id="qcFirstName" placeholder="نام"></div>
@@ -443,9 +445,14 @@ const Customers = (function () {
       <div class="form-group"><label>تلفن (اختیاری)</label><input type="text" id="qcPhone" placeholder="تلفن"></div>
       <div class="modal-actions">
         <button class="btn btn-success" onclick="Customers.confirmQuickCreate()">ساخت</button>
-        <button class="btn btn-outline" onclick="window.__quickCreateCallback = null; App.closeModalForce()">انصراف</button>
+        <button class="btn btn-outline" onclick="Customers.cancelQuickCreate()">انصراف</button>
       </div>
     `);
+  }
+
+  function cancelQuickCreate() {
+    _quickCreateCallback = null;
+    App.closeModalForce();
   }
 
   async function confirmQuickCreate() {
@@ -456,8 +463,8 @@ const Customers = (function () {
     let result = await quickCreate(firstName, lastName, phone);
     App.closeModalForce();
     App.toast("مشتری #" + result.displayId + " ساخته شد");
-    let cb = window.__quickCreateCallback;
-    window.__quickCreateCallback = null;
+    let cb = _quickCreateCallback;
+    _quickCreateCallback = null;
     if (cb) cb(result);
   }
 
@@ -471,6 +478,6 @@ const Customers = (function () {
   return {
     render, showAddCustomer, saveCustomer, showProfile, saveProfile,
     showChargeWallet, doCharge, showPayDebt, doPayDebt,
-    showManualAdjust, doManualAdjust, getCustomerName, quickCreate, promptQuickCreate, confirmQuickCreate, filterList, refresh,
+    showManualAdjust, doManualAdjust, getCustomerName, quickCreate, promptQuickCreate, cancelQuickCreate, confirmQuickCreate, filterList, refresh,
   };
 })();

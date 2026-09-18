@@ -303,7 +303,7 @@ const Overnight = (function () {
 
   function refresh() {
     let el = document.getElementById("tab-overnight");
-    if (el) render(el);
+    if (el && el.classList.contains("active")) render(el);
   }
 
   // ---- Detail / transaction history --------------------------------------
@@ -408,6 +408,7 @@ const Overnight = (function () {
       if (!reservation || reservation.status !== "active") return { success: false };
 
       let item;
+      let ops = [];
       if (source === "cafe") {
         item = await DB.get("cafeItems", itemId);
         if (!item) return { success: false };
@@ -416,14 +417,14 @@ const Overnight = (function () {
           if (!item.unlimited && item.stock <= 0) { App.toast("موجودی تمام شده"); return { success: false }; }
           existing.qty++;
           if (!item.unlimited) {
-            await DB.put("cafeItems", { ...item, stock: item.stock - 1 });
+            ops.push({ store: "cafeItems", type: "put", data: { ...item, stock: item.stock - 1 } });
           }
         } else {
           if (!item.unlimited && item.stock <= 0) { App.toast("موجودی تمام شده"); return { success: false }; }
           let price = applyDiscountPct(item.price, reservation.discountPercent || 0);
           reservation.items.push({ itemId, name: item.name, price, qty: 1, type: "cafe", addedAt: new Date().toISOString() });
           if (!item.unlimited) {
-            await DB.put("cafeItems", { ...item, stock: item.stock - 1 });
+            ops.push({ store: "cafeItems", type: "put", data: { ...item, stock: item.stock - 1 } });
           }
         }
       } else {
@@ -438,7 +439,8 @@ const Overnight = (function () {
         }
       }
 
-      await DB.put("overnightReservations", reservation);
+      ops.push({ store: "overnightReservations", type: "put", data: reservation });
+      await DB.runAtomic(ops);
       await DB.logActivity("افزودن آیتم به رزرو شب", "رزرو #" + id + " | " + item.name);
       App.toast("آیتم اضافه شد");
       showAddItem(id);

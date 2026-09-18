@@ -187,35 +187,38 @@ const PCs = (function () {
   }
 
   async function confirmTurnOn(deviceId) {
-    if (selectedIds.length === 0) { App.toast("شناسه را انتخاب کنید"); return; }
-    let device = await DB.get("devices", deviceId);
-    if (device && device.status && device.status !== "free") {
-      App.toast("این دستگاه در حال استفاده در یک مسابقه است");
-      return;
-    }
+    return Utils.guardDoubleClick(async () => {
+      if (selectedIds.length === 0) { App.toast("شناسه را انتخاب کنید"); return { success: false }; }
+      let device = await DB.get("devices", deviceId);
+      if (device && device.status && device.status !== "free") {
+        App.toast("این دستگاه در حال استفاده در یک مسابقه است");
+        return { success: false };
+      }
 
-    let pricing = await DB.getSetting("pricing", {});
-    let rate = pricing.pcRate || 3000;
+      let pricing = await DB.getSetting("pricing", {});
+      let rate = pricing.pcRate || 3000;
 
-    let startTime = new Date();
-    let timeInput = document.getElementById("pcStartTime").value;
-    if (timeInput) {
-      startTime = parseTimeInput(timeInput);
-    }
+      let startTime = new Date();
+      let timeInput = document.getElementById("pcStartTime").value;
+      if (timeInput) {
+        startTime = parseTimeInput(timeInput);
+      }
 
-    let session = {
-      deviceId, deviceType: "pc", ids: [...selectedIds], controllerCount: 1,
-      timeBlocks: [{ startTime: startTime.toISOString(), endTime: null, rate, controllerCount: 1, deviceType: "pc", deviceId, price: 0 }],
-      items: [], status: "active", createdAt: startTime.toISOString(),
-    };
+      let session = {
+        deviceId, deviceType: "pc", ids: [...selectedIds], controllerCount: 1,
+        timeBlocks: [{ startTime: startTime.toISOString(), endTime: null, rate, controllerCount: 1, deviceType: "pc", deviceId, price: 0 }],
+        items: [], status: "active", createdAt: startTime.toISOString(),
+      };
 
-    await DB.add("sessions", session);
-    await DB.put("devices", { ...await DB.get("devices", deviceId), status: "busy" });
-    await DB.logActivity("روشن کردن پی‌سی", "دستگاه #" + deviceId + " | شناسه: #" + selectedIds[0]);
-    selectedIds = [];
-    App.closeModalForce();
-    App.toast("پی‌سی روشن شد");
-    refresh();
+      await DB.add("sessions", session);
+      await DB.put("devices", { ...await DB.get("devices", deviceId), status: "busy" });
+      await DB.logActivity("روشن کردن پی‌سی", "دستگاه #" + deviceId + " | شناسه: #" + selectedIds[0]);
+      selectedIds = [];
+      App.closeModalForce();
+      App.toast("پی‌سی روشن شد");
+      refresh();
+      return { success: true };
+    });
   }
 
   async function openBlock(deviceId) {

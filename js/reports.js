@@ -485,8 +485,13 @@ const Reports = (function () {
   // freezeBusinessDay is idempotent and never re-freezes or wipes a row that
   // already has totals/recon data. This is what makes the freeze work even
   // when the app was closed across one or more 23:35 boundaries.
+  let _autoCloseLastRun = 0;
   async function autoClosePastDays(now) {
     now = now instanceof Date ? now : new Date();
+    // Skip if ran less than 60 seconds ago (prevents re-fetching entire DB on
+    // every 30s tick + visibility change).
+    if (Date.now() - _autoCloseLastRun < 60000) return;
+    _autoCloseLastRun = Date.now();
 
     let preloaded = {
       sessions: await DB.getAll("sessions"),
@@ -1048,39 +1053,98 @@ const Reports = (function () {
     if (type === "session") {
       let session = await DB.get("sessions", id);
       if (session) {
+        let ops = [];
+        // Reverse customer payment
         let customerId = session.settlePayerId || (session.ids && session.ids[0]) || null;
-        if (customerId) {
-          await reversePayment(customerId, session.settleAmount || 0, session.settlePayType || "cash", session.payBreakdown);
+        if (customerId && (session.settleAmount || 0) > 0) {
+          let customer = await DB.get("customers", customerId);
+          if (customer) {
+            let payBreakdown = session.payBreakdown;
+            let amount = session.settleAmount || 0;
+            let payType = session.settlePayType || "cash";
+            if (payBreakdown && typeof payBreakdown === "object") {
+              let w = payBreakdown.wallet || 0;
+              let d = payBreakdown.debt || 0;
+              let other = (payBreakdown.cash || 0) + (payBreakdown.card || 0);
+              if (w) { customer.wallet = (customer.wallet || 0) + w; customer.totalPaid = Math.max(0, (customer.totalPaid || 0) - w); }
+              if (d) { customer.debt = Math.max(0, (customer.debt || 0) - d); }
+              if (other) { customer.totalPaid = Math.max(0, (customer.totalPaid || 0) - other); }
+            } else if (payType === "wallet") {
+              customer.wallet = (customer.wallet || 0) + amount;
+              customer.totalPaid = Math.max(0, (customer.totalPaid || 0) - amount);
+            } else if (payType === "debt") {
+              customer.debt = Math.max(0, (customer.debt || 0) - amount);
+            } else {
+              customer.totalPaid = Math.max(0, (customer.totalPaid || 0) - amount);
+            }
+            ops.push({ store: "customers", type: "put", data: customer });
+          }
         }
-        // Restore cafe item stock for items attached to this session.
-        await restoreCafeStock(session.items || []);
-        // Remove associated blockPayments records to prevent double accounting.
+        // Restore cafe item stock
+        let cafeItems = await DB.getAll("cafeItems");
+        let cafeItemMutations = {};
+        for (let it of (session.items || [])) {
+          if (it.type === "cafe") {
+            let cafeItem = it.itemId != null ? cafeItems.find((ci) => ci.id === it.itemId) : cafeItems.find((ci) => ci.name === it.name);
+            if (cafeItem && !cafeItem.unlimited) {
+              if (!cafeItemMutations[cafeItem.id]) cafeItemMutations[cafeItem.id] = { ...cafeItem };
+              cafeItemMutations[cafeItem.id].stock += (it.qty || 1);
+            }
+          }
+        }
+        for (let key in cafeItemMutations) {
+          ops.push({ store: "cafeItems", type: "put", data: cafeItemMutations[key] });
+        }
+        // Remove blockPayments
         let allBp = await DB.getAll("blockPayments");
         let sessionBp = allBp.filter((bp) => bp.sessionId === session.id);
         for (let bp of sessionBp) {
-          await DB.remove("blockPayments", bp.id);
+          ops.push({ store: "blockPayments", type: "remove", data: bp.id });
         }
-        // Free the device only if no active session is using it.
+        // Free device if no other active session
         if (session.deviceId) {
           let sessions = await DB.getAll("sessions");
           let activeOnDevice = sessions.find((s) => s.deviceId === session.deviceId && s.status === "active" && s.id !== session.id);
           if (!activeOnDevice) {
             let device = await DB.get("devices", session.deviceId);
             if (device && device.status !== "free") {
-              device.status = "free";
-              await DB.put("devices", device);
+              ops.push({ store: "devices", type: "put", data: { ...device, status: "free" } });
             }
           }
         }
+        // Mark session deleted
         session.status = "deleted";
         session.settledAt = null;
-        await DB.put("sessions", session);
+        ops.push({ store: "sessions", type: "put", data: session });
+        await DB.runAtomic(ops);
       }
     } else if (type === "blockPayment") {
       let bp = await DB.get("blockPayments", id);
       if (bp) {
+        let ops = [];
         if (bp.customerId) {
-          await reversePayment(bp.customerId, bp.amount || 0, bp.payType || "cash", bp.payBreakdown);
+          let customer = await DB.get("customers", bp.customerId);
+          if (customer) {
+            let amount = bp.amount || 0;
+            let payType = bp.payType || "cash";
+            let payBreakdown = bp.payBreakdown;
+            if (payBreakdown && typeof payBreakdown === "object") {
+              let w = payBreakdown.wallet || 0;
+              let d = payBreakdown.debt || 0;
+              let other = (payBreakdown.cash || 0) + (payBreakdown.card || 0);
+              if (w) { customer.wallet = (customer.wallet || 0) + w; customer.totalPaid = Math.max(0, (customer.totalPaid || 0) - w); }
+              if (d) { customer.debt = Math.max(0, (customer.debt || 0) - d); }
+              if (other) { customer.totalPaid = Math.max(0, (customer.totalPaid || 0) - other); }
+            } else if (payType === "wallet") {
+              customer.wallet = (customer.wallet || 0) + amount;
+              customer.totalPaid = Math.max(0, (customer.totalPaid || 0) - amount);
+            } else if (payType === "debt") {
+              customer.debt = Math.max(0, (customer.debt || 0) - amount);
+            } else {
+              customer.totalPaid = Math.max(0, (customer.totalPaid || 0) - amount);
+            }
+            ops.push({ store: "customers", type: "put", data: customer });
+          }
         }
         if (bp.deviceType === "tournament" && bp.matchId) {
           let match = await DB.get("matches", bp.matchId);
@@ -1090,20 +1154,54 @@ const Reports = (function () {
             match.settleAmount = null;
             match.settlerName = null;
             match.settledAt = null;
-            await DB.put("matches", match);
+            ops.push({ store: "matches", type: "put", data: match });
           }
         }
-        await DB.remove("blockPayments", id);
+        ops.push({ store: "blockPayments", type: "remove", data: id });
+        await DB.runAtomic(ops);
       }
     } else {
       let order = await DB.get("cafeOrders", id);
       if (order) {
+        let ops = [];
         if (order.customerId) {
-          await reversePayment(order.customerId, order.total || 0, order.payType || "cash", order.payBreakdown);
+          let customer = await DB.get("customers", order.customerId);
+          if (customer) {
+            let amount = order.total || 0;
+            let payType = order.payType || "cash";
+            let payBreakdown = order.payBreakdown;
+            if (payBreakdown && typeof payBreakdown === "object") {
+              let w = payBreakdown.wallet || 0;
+              let d = payBreakdown.debt || 0;
+              let other = (payBreakdown.cash || 0) + (payBreakdown.card || 0);
+              if (w) { customer.wallet = (customer.wallet || 0) + w; customer.totalPaid = Math.max(0, (customer.totalPaid || 0) - w); }
+              if (d) { customer.debt = Math.max(0, (customer.debt || 0) - d); }
+              if (other) { customer.totalPaid = Math.max(0, (customer.totalPaid || 0) - other); }
+            } else if (payType === "wallet") {
+              customer.wallet = (customer.wallet || 0) + amount;
+              customer.totalPaid = Math.max(0, (customer.totalPaid || 0) - amount);
+            } else if (payType === "debt") {
+              customer.debt = Math.max(0, (customer.debt || 0) - amount);
+            } else {
+              customer.totalPaid = Math.max(0, (customer.totalPaid || 0) - amount);
+            }
+            ops.push({ store: "customers", type: "put", data: customer });
+          }
         }
-        // Restore stock for the items in this cafe order.
-        await restoreCafeStock((order.items || []).map((i) => ({ itemId: i.id, name: i.name, qty: i.qty })));
-        await DB.remove("cafeOrders", id);
+        let cafeItems = await DB.getAll("cafeItems");
+        let cafeItemMutations = {};
+        for (let it of (order.items || [])) {
+          let cafeItem = it.id != null ? cafeItems.find((ci) => ci.id === it.id) : cafeItems.find((ci) => ci.name === it.name);
+          if (cafeItem && !cafeItem.unlimited) {
+            if (!cafeItemMutations[cafeItem.id]) cafeItemMutations[cafeItem.id] = { ...cafeItem };
+            cafeItemMutations[cafeItem.id].stock += (it.qty || 1);
+          }
+        }
+        for (let key in cafeItemMutations) {
+          ops.push({ store: "cafeItems", type: "put", data: cafeItemMutations[key] });
+        }
+        ops.push({ store: "cafeOrders", type: "remove", data: id });
+        await DB.runAtomic(ops);
       }
     }
     await DB.logActivity("حذف تراکنش", "نوع: " + type + " | شناسه: " + id);

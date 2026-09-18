@@ -204,38 +204,40 @@ const Consoles = (function () {
   }
 
   async function confirmStartSession(deviceId) {
-    if (selectedIds.length === 0) { App.toast("حداقل یک شناسه انتخاب کنید"); return; }
-    let device = await DB.get("devices", deviceId);
-    if (device && device.status && device.status !== "free") {
-      App.toast("این دستگاه در حال استفاده در یک مسابقه است");
-      return;
-    }
-    let controllerCount = parseInt(document.getElementById("sControllerCount").value) || 1;
-    let pricing = await DB.getSetting("pricing", {});
-    let rates = pricing.consoleRates || { 1: 5000, 2: 7000, 3: 9000, 4: 11000 };
-    // Ensure rate is always valid: fallback to rate[1] if controllerCount is invalid
-    let rate = rates[controllerCount] || rates[1] || 5000;
+    return Utils.guardDoubleClick(async () => {
+      if (selectedIds.length === 0) { App.toast("حداقل یک شناسه انتخاب کنید"); return { success: false }; }
+      let device = await DB.get("devices", deviceId);
+      if (device && device.status && device.status !== "free") {
+        App.toast("این دستگاه در حال استفاده در یک مسابقه است");
+        return { success: false };
+      }
+      let controllerCount = parseInt(document.getElementById("sControllerCount").value) || 1;
+      let pricing = await DB.getSetting("pricing", {});
+      let rates = pricing.consoleRates || { 1: 5000, 2: 7000, 3: 9000, 4: 11000 };
+      let rate = rates[controllerCount] || rates[1] || 5000;
 
-    let startTime = new Date();
-    let timeInput = document.getElementById("sStartTime").value;
-    if (timeInput) {
-      startTime = parseTimeInput(timeInput);
-    }
+      let startTime = new Date();
+      let timeInput = document.getElementById("sStartTime").value;
+      if (timeInput) {
+        startTime = parseTimeInput(timeInput);
+      }
 
-    let session = {
-      deviceId, deviceType: "console", ids: [...selectedIds], controllerCount,
-      timeBlocks: [{ startTime: startTime.toISOString(), endTime: null, rate, controllerCount, deviceType: "console", deviceId, price: 0 }],
-      items: [], status: "active", createdAt: startTime.toISOString(),
-    };
+      let session = {
+        deviceId, deviceType: "console", ids: [...selectedIds], controllerCount,
+        timeBlocks: [{ startTime: startTime.toISOString(), endTime: null, rate, controllerCount, deviceType: "console", deviceId, price: 0 }],
+        items: [], status: "active", createdAt: startTime.toISOString(),
+      };
 
-    await DB.add("sessions", session);
-    await DB.put("devices", { ...await DB.get("devices", deviceId), status: "busy" });
-    await DB.logActivity("شروع سشن کنسول", "دستگاه #" + deviceId + " | شناسه‌ها: " + selectedIds.map((i) => "#" + i).join(", "));
+      await DB.add("sessions", session);
+      await DB.put("devices", { ...await DB.get("devices", deviceId), status: "busy" });
+      await DB.logActivity("شروع سشن کنسول", "دستگاه #" + deviceId + " | شناسه‌ها: " + selectedIds.map((i) => "#" + i).join(", "));
 
-    selectedIds = [];
-    App.closeModalForce();
-    App.toast("سشن شروع شد");
-    refresh();
+      selectedIds = [];
+      App.closeModalForce();
+      App.toast("سشن شروع شد");
+      refresh();
+      return { success: true };
+    });
   }
 
   async function openBlock(deviceId) {
@@ -782,9 +784,11 @@ const Consoles = (function () {
     session.timeBlocks.push({ startTime: new Date().toISOString(), endTime: null, rate: newRate, controllerCount: newControllerCount, deviceType: targetDevice.type, deviceId: targetId, price: 0 });
 
     let oldDevice = await DB.get("devices", deviceId);
-    await DB.put("sessions", session);
-    await DB.put("devices", { ...oldDevice, status: "free" });
-    await DB.put("devices", { ...targetDevice, status: "busy" });
+    await DB.runAtomic([
+      { store: "sessions", type: "put", data: session },
+      { store: "devices", type: "put", data: { ...oldDevice, status: "free" } },
+      { store: "devices", type: "put", data: { ...targetDevice, status: "busy" } },
+    ]);
     await DB.logActivity("جابه‌جایی سشن", "سشن #" + session.id + " از " + oldDevice.name + " به " + targetDevice.name);
     App.stopTimer("timer-" + deviceId);
     App.closeModalForce();
@@ -901,7 +905,7 @@ const Consoles = (function () {
 
   return {
     render, startSession, confirmStartSession, openBlock, closeBlock, confirmCloseBlock,
-    settleBlock, settleSingleBlock, confirmSettleBlock: settleSingleBlock, settleSession, confirmSettleSession,
+    settleBlock, settleSingleBlock, settleSession, confirmSettleSession,
     showSessionDetail, showAddItem, addItemClick, updateItemQty, removeItem, transferSession, confirmTransfer,
     cancelSession, quickCreateCustomer,
     filterCustomers, pickCustomer, removeSelectedId,

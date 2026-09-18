@@ -1030,6 +1030,9 @@ const Tournaments = (function () {
   async function saveMatchItem(matchId, itemId, source) {
     let match = await DB.get("matches", matchId);
     if (!match) return;
+    if (match.settled) { App.toast("این بازی قبلاً تسویه شده و قابل ویرایش نیست"); return; }
+    let tournament = await DB.get("tournaments", match.tournamentId);
+    if (tournament && tournament.status === "closed") { App.toast("این مسابقه بسته شده و قابل ویرایش نیست"); return; }
     let qty = parseInt(document.getElementById("matchItemQty").value) || 1;
     let assignedTo = parseInt(document.getElementById("matchItemAssign").value) || null;
 
@@ -1246,19 +1249,20 @@ const Tournaments = (function () {
       if (match.settled) { App.toast("این بازی قبلاً تسویه شده"); return { success: false }; }
       let payerId = parseInt(document.getElementById("matchPayerId").value) || 0;
       let payType = document.getElementById("matchPayType").value;
-      if (payType === "combined") {
-        let cardAmt = parseInt(document.getElementById("matchCombinedCardAmount").value) || 0;
-        let cashAmt = parseInt(document.getElementById("matchCombinedCashAmount").value) || 0;
-        if (cardAmt + cashAmt !== total) { App.toast("مبلغ‌ها با کل مطابقت ندارد"); return { success: false }; }
-        payType = { card: cardAmt, cash: cashAmt };
-      }
-      let settlerName = Utils.getSettlerName();
 
       // Recompute the total from the match itself, not the amount baked into the
       // modal button (items may have been added after the modal opened).
       let totalItems = (match.items || []).reduce((s, i) => s + (i.price * i.qty), 0);
       let effectiveTotal = (match.deviceCost || 0) + totalItems;
       if (effectiveTotal <= 0) { App.toast("هزینه‌ای برای تسویه وجود ندارد"); return { success: false }; }
+
+      if (payType === "combined") {
+        let cardAmt = parseInt(document.getElementById("matchCombinedCardAmount").value) || 0;
+        let cashAmt = parseInt(document.getElementById("matchCombinedCashAmount").value) || 0;
+        if (cardAmt + cashAmt !== effectiveTotal) { App.toast("مبلغ‌ها با کل مطابقت ندارد"); return { success: false }; }
+        payType = { card: cardAmt, cash: cashAmt };
+      }
+      let settlerName = Utils.getSettlerName();
 
       let customer = await DB.get("customers", payerId);
       if (!customer) { App.toast("پرداخت‌کننده نامعتبر است"); return { success: false }; }
@@ -1335,12 +1339,12 @@ const Tournaments = (function () {
       let t = await DB.get("tournaments", tournamentId);
       if (!t) return { success: false };
       let payType = document.getElementById("bulkSettlePayType")?.value || "cash";
+      let matches;
+      try { matches = await DB.getByIndex("matches", "by_tournament", tournamentId); } catch (e) { matches = (await DB.getAll("matches")).filter((m) => m.tournamentId === tournamentId); }
       if (payType === "combined") {
         let cardAmt = parseInt(document.getElementById("bulkCombinedCardAmount").value) || 0;
         let cashAmt = parseInt(document.getElementById("bulkCombinedCashAmount").value) || 0;
         let totalGrand = 0;
-        let matches;
-        try { matches = await DB.getByIndex("matches", "by_tournament", tournamentId); } catch (e) { matches = (await DB.getAll("matches")).filter((m) => m.tournamentId === tournamentId); }
         let unsettled = matches.filter((m) => !m.settled && ((m.deviceCost || 0) > 0 || (m.items || []).length > 0));
         for (let m of unsettled) {
           let totalItems = (m.items || []).reduce((s, i) => s + (i.price * i.qty), 0);
@@ -1349,8 +1353,6 @@ const Tournaments = (function () {
         if (cardAmt + cashAmt !== totalGrand) { App.toast("مبلغ‌ها با کل مطابقت ندارد"); return { success: false }; }
         payType = { card: cardAmt, cash: cashAmt };
       }
-      let matches;
-      try { matches = await DB.getByIndex("matches", "by_tournament", tournamentId); } catch (e) { matches = (await DB.getAll("matches")).filter((m) => m.tournamentId === tournamentId); }
 
       let unsettled = matches.filter((m) => !m.settled && ((m.deviceCost || 0) > 0 || (m.items || []).length > 0));
       if (unsettled.length === 0) { App.toast("بازی تسویه‌نشده‌ای وجود ندارد"); return { success: false }; }

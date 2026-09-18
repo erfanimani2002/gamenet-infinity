@@ -147,24 +147,27 @@ const Billiard = (function () {
   }
 
   async function confirmStartSession(deviceId) {
-    if (selectedIds.length === 0) { App.toast("حداقل یک شناسه"); return; }
-    let device = await DB.get("devices", deviceId);
-    if (device && device.status && device.status !== "free") {
-      App.toast("این دستگاه در حال استفاده در یک مسابقه است");
-      return;
-    }
-    let stickCount = parseInt(document.getElementById("bStickCount").value);
-    let pricing = await DB.getSetting("pricing", {});
-    let rate = (pricing.billiardRates || {})[stickCount] || 8000;
-    let startTime = new Date();
-    let timeInput = document.getElementById("bStartTime").value;
-    if (timeInput) { startTime = parseTimeInput(timeInput); }
+    return Utils.guardDoubleClick(async () => {
+      if (selectedIds.length === 0) { App.toast("حداقل یک شناسه"); return { success: false }; }
+      let device = await DB.get("devices", deviceId);
+      if (device && device.status && device.status !== "free") {
+        App.toast("این دستگاه در حال استفاده در یک مسابقه است");
+        return { success: false };
+      }
+      let stickCount = parseInt(document.getElementById("bStickCount").value);
+      let pricing = await DB.getSetting("pricing", {});
+      let rate = (pricing.billiardRates || {})[stickCount] || 8000;
+      let startTime = new Date();
+      let timeInput = document.getElementById("bStartTime").value;
+      if (timeInput) { startTime = parseTimeInput(timeInput); }
 
-    let session = { deviceId, deviceType: "billiard", ids: [...selectedIds], controllerCount: stickCount, timeBlocks: [{ startTime: startTime.toISOString(), endTime: null, rate, controllerCount: stickCount, deviceType: "billiard", deviceId, price: 0 }], items: [], status: "active", createdAt: startTime.toISOString() };
-    await DB.add("sessions", session);
-    await DB.put("devices", { ...await DB.get("devices", deviceId), status: "busy" });
-    await DB.logActivity("شروع سشن بیلیارد", "میز #" + deviceId + " | " + (stickCount === 4 ? "چهارچوب" : "دوچوب") + " | " + selectedIds.map((i) => "#" + i).join(", "));
-    selectedIds = []; App.closeModalForce(); App.toast("سشن شروع شد"); refresh();
+      let session = { deviceId, deviceType: "billiard", ids: [...selectedIds], controllerCount: stickCount, timeBlocks: [{ startTime: startTime.toISOString(), endTime: null, rate, controllerCount: stickCount, deviceType: "billiard", deviceId, price: 0 }], items: [], status: "active", createdAt: startTime.toISOString() };
+      await DB.add("sessions", session);
+      await DB.put("devices", { ...await DB.get("devices", deviceId), status: "busy" });
+      await DB.logActivity("شروع سشن بیلیارد", "میز #" + deviceId + " | " + (stickCount === 4 ? "چهارچوب" : "دوچوب") + " | " + selectedIds.map((i) => "#" + i).join(", "));
+      selectedIds = []; App.closeModalForce(); App.toast("سشن شروع شد"); refresh();
+      return { success: true };
+    });
   }
 
   async function openBlock(deviceId) {

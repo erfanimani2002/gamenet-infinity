@@ -101,7 +101,8 @@ http.createServer((req, res) => {
   }
   if (u === "/") u = "/index.html";
   const file = path.resolve(ROOT, "." + u);
-  if (!file.startsWith(ROOT)) {
+  const rel = path.relative(ROOT, file);
+  if (rel.startsWith("..") || path.isAbsolute(rel)) {
     res.writeHead(403);
     return res.end();
   }

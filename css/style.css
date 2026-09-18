@@ -2059,15 +2059,6 @@ canvas {
   background: var(--danger-bg);
 }
 
-@media (max-width: 1024px) {
-  :root { --sidebar-w: 180px; }
-  .main-content { padding: 14px; }
-  .device-list .device-item { flex-wrap: wrap; }
-  .device-list .device-actions { justify-content: flex-start; width: 100%; }
-  .report-summary { gap: 10px; }
-  .club-card { grid-template-columns: 1fr; grid-template-areas: "header" "stats" "info"; }
-}
-
 /* Games managed lists: cards become list rows */
 .item-grid.is-list,
 .games-list {

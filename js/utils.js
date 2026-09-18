@@ -120,9 +120,8 @@ const Utils = (function () {
   }
 
   function escapeHtml(str) {
-    let div = document.createElement("div");
-    div.appendChild(document.createTextNode(str));
-    return div.innerHTML.replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+    if (str == null) return "";
+    return String(str).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
   }
 
   function renderSelectLabel(list, value) {

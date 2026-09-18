@@ -134,8 +134,8 @@ const AdminPanel = (function () {
     `;
     el.innerHTML = html;
 
-    Inventory.render(document.getElementById("inventorySection"));
-    Penalties.render(document.getElementById("penaltySection"));
+    await Inventory.render(document.getElementById("inventorySection"));
+    await Penalties.render(document.getElementById("penaltySection"));
     renderClubConfig(document.getElementById("clubRankConfig"));
   }
 
