@@ -10,6 +10,13 @@ const Customers = (function () {
         <div class="search-box">
           <input type="text" id="customerSearch" placeholder="جستجو بر اساس شماره ایدی یا نام..." oninput="Customers.filterList()">
         </div>
+        <div class="list-row list-header" style="font-weight:600;color:var(--text-muted);font-size:12px;border-bottom:2px solid var(--border);">
+          <span class="row-label" style="min-width:60px">ایدی</span>
+          <span class="row-value" style="min-width:120px">نام</span>
+          <span class="row-value" style="min-width:80px">موجودی</span>
+          <span class="row-value" style="min-width:80px">بدهی</span>
+          <span class="row-actions" style="min-width:260px">عملیات</span>
+        </div>
         <div id="customerList">
           ${renderCustomerList(customers)}
         </div>
@@ -206,13 +213,17 @@ const Customers = (function () {
       ${payments.map((p) => `
         <div class="block-item">
           <span>پرداخت بدهی: ${Utils.formatCurrency(p.amount)} (${p.paymentType === 'cash' ? 'نقدی' : 'کارتی'})</span>
-          <span class="text-muted text-sm">${Jalali.formatDateTime(p.date)}</span>
+          <span class="text-muted text-sm">${Jalali.formatDateTime(p.date)}
+            <button class="btn btn-outline btn-sm" style="color:var(--danger,#e53e3e);margin-inline-start:6px" onclick="Customers.deleteDebtPayment(${p.id}, ${id})">حذف</button>
+          </span>
         </div>
       `).join("")}
       ${charges.map((ch) => `
         <div class="block-item">
           <span>شارژ کیف‌پول: ${Utils.formatCurrency(ch.amount)} (${ch.paymentType === 'cash' ? 'نقدی' : 'کارتی'})</span>
-          <span class="text-muted text-sm">${Jalali.formatDateTime(ch.date)}</span>
+          <span class="text-muted text-sm">${Jalali.formatDateTime(ch.date)}
+            <button class="btn btn-outline btn-sm" style="color:var(--danger,#e53e3e);margin-inline-start:6px" onclick="Customers.deleteCharge(${ch.id}, ${id})">حذف</button>
+          </span>
         </div>
       `).join("")}
       <hr class="section-divider">
@@ -402,6 +413,50 @@ const Customers = (function () {
     refresh();
   }
 
+  // Deleting a wallet charge (instead of using "اصلاح دستی") reverses BOTH the
+  // customer's current balance AND removes the underlying walletCharges ledger
+  // row that daily/monthly reports sum "نقدی دریافتی"/"شارژ کیف‌پول" from.
+  // "اصلاح دستی" only overwrites the customer's snapshot — it leaves the old
+  // ledger row in place, so a report for that day keeps counting money that
+  // was never actually kept. Use this instead whenever a charge was entered
+  // by mistake and needs to be fully undone.
+  async function deleteCharge(chargeId, customerId) {
+    if (!confirm("آیا از حذف این شارژ مطمئن هستید؟ این کار هم از موجودی مشتری کم می‌شود و هم از گزارش‌ها حذف می‌شود.")) return;
+    let charge = await DB.get("walletCharges", chargeId);
+    if (!charge) { App.toast("تراکنش یافت نشد"); return; }
+    let c = await DB.get("customers", customerId);
+    if (!c) { App.toast("مشتری یافت نشد"); return; }
+    c.wallet = (c.wallet || 0) - (charge.amount || 0);
+    await DB.runAtomic([
+      { store: "customers", type: "put", data: c },
+      { store: "walletCharges", type: "remove", data: chargeId },
+    ]);
+    await DB.logActivity("حذف شارژ کیف‌پول", "ایدی #" + (c.displayId || c.id) + " - مبلغ: " + Utils.formatCurrency(charge.amount || 0));
+    App.toast("شارژ حذف شد");
+    showProfile(customerId);
+    refresh();
+  }
+
+  // Mirror of deleteCharge for debt payments: restores the debt and removes
+  // the debtPayments ledger row so it no longer appears in daily reports.
+  async function deleteDebtPayment(paymentId, customerId) {
+    if (!confirm("آیا از حذف این پرداخت بدهی مطمئن هستید؟ این کار هم بدهی را برمی‌گرداند و هم از گزارش‌ها حذف می‌شود.")) return;
+    let payment = await DB.get("debtPayments", paymentId);
+    if (!payment) { App.toast("تراکنش یافت نشد"); return; }
+    let c = await DB.get("customers", customerId);
+    if (!c) { App.toast("مشتری یافت نشد"); return; }
+    c.debt = (c.debt || 0) + (payment.amount || 0);
+    c.totalPaid = Math.max(0, (c.totalPaid || 0) - (payment.amount || 0));
+    await DB.runAtomic([
+      { store: "customers", type: "put", data: c },
+      { store: "debtPayments", type: "remove", data: paymentId },
+    ]);
+    await DB.logActivity("حذف پرداخت بدهی", "ایدی #" + (c.displayId || c.id) + " - مبلغ: " + Utils.formatCurrency(payment.amount || 0));
+    App.toast("پرداخت حذف شد");
+    showProfile(customerId);
+    refresh();
+  }
+
   async function getCustomerName(id) {
     let c = await DB.get("customers", id);
     if (c) return "#" + (c.displayId || c.id);
@@ -483,6 +538,6 @@ const Customers = (function () {
   return {
     render, showAddCustomer, saveCustomer, showProfile, saveProfile,
     showChargeWallet, doCharge, showPayDebt, doPayDebt,
-    showManualAdjust, doManualAdjust, getCustomerName, quickCreate, promptQuickCreate, cancelQuickCreate, confirmQuickCreate, filterList, refresh,
+    showManualAdjust, doManualAdjust, deleteCharge, deleteDebtPayment, getCustomerName, quickCreate, promptQuickCreate, cancelQuickCreate, confirmQuickCreate, filterList, refresh,
   };
 })();
