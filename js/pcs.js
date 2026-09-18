@@ -736,6 +736,7 @@ const PCs = (function () {
     }
 
     let targetDevice = await DB.get("devices", targetId);
+    if (!targetDevice) { App.toast("دستگاه مقصد یافت نشد"); return; }
     let pricing = await DB.getSetting("pricing", {});
     let { rate: newRate, controllerCount: newControllerCount } = Utils.resolveTransferRate(pricing, targetDevice.type, session.controllerCount);
 

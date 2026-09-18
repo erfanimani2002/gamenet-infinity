@@ -31,7 +31,8 @@ const Icons = (function () {
 
   function get(name, size) {
     const s = size || 18;
-    return `<svg class="svg-icon svg-${name}" width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">${P[name] || P.reports}</svg>`;
+    let safeName = String(name).replace(/[^a-zA-Z0-9_-]/g, "");
+    return `<svg class="svg-icon svg-${safeName}" width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">${P[name] || ""}</svg>`;
   }
 
   return { get, names: Object.keys(P) };

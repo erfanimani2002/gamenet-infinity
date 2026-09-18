@@ -49,11 +49,13 @@ const Inventory = (function () {
     let unlimited = document.getElementById("itemUnlimited").checked;
     let stock = unlimited ? -1 : (parseInt(document.getElementById("itemStock").value) || 0);
     if (!name) { App.toast("نام آیتم الزامی است"); return; }
+    if (!Number.isFinite(price) || price < 0) { App.toast("قیمت نامعتبر"); return; }
 
     let imageData = null;
     let fileInput = document.getElementById("itemImage");
     if (fileInput.files.length > 0) {
-      imageData = await readFileAsDataURL(fileInput.files[0]);
+      try { imageData = await readFileAsDataURL(fileInput.files[0]); }
+      catch (e) { App.toast("خطا در خواندن تصویر"); return; }
     }
 
     await DB.add("cafeItems", { name, price, stock, unlimited, image: imageData });

@@ -47,7 +47,6 @@ const Debts = (function () {
       // not insert a 0-amount debtPayments row.
       if (amount <= 0) { App.toast("بدهی برای پرداخت وجود ندارد"); return { success: false }; }
       c.debt -= amount;
-      c.totalPaid = (c.totalPaid || 0) + amount;
       await DB.runAtomic([
         { store: "customers", type: "put", data: c },
         { store: "debtPayments", type: "add", data: { customerId: id, amount, paymentType: payType, date: new Date().toISOString() } },
@@ -61,13 +60,15 @@ const Debts = (function () {
   async function showHistory(id) {
     let c = await DB.get("customers", id);
     if (!c) { App.toast("مشتری یافت نشد"); return; }
-    let payments = await DB.getByIndex("debtPayments", "by_customer", id);
+    let payments;
+    try { payments = await DB.getByIndex("debtPayments", "by_customer", id); }
+    catch (e) { payments = (await DB.getAll("debtPayments")).filter((p) => p.customerId === id); }
     App.openModal(`
       <h2>تاریخچه بدهی - #${c.displayId || c.id}</h2>
       <div class="list-row"><span class="row-label">بدهی فعلی</span><span class="row-value debt-amount">${Utils.formatCurrency(c.debt)}</span></div>
       <hr class="section-divider">
       ${payments.length === 0 ? '<div class="text-muted">بدون سابقه</div>' : ''}
-      ${payments.map((p) => `<div class="block-item"><span>پرداخت: ${Utils.formatCurrency(p.amount)} (${p.paymentType === 'cash' ? 'نقدی' : 'کارتی'})</span><span class="text-muted text-sm">${Jalali.formatDateTime(p.date)}</span></div>`).join("")}
+      ${payments.map((p) => `<div class="block-item"><span>پرداخت: ${Utils.formatCurrency(p.amount)} (${p.paymentType === 'cash' ? 'نقدی' : 'کارتی'})</span><span class="text-muted text-sm">${p.date ? Jalali.formatDateTime(p.date) : '—'}</span></div>`).join("")}
       <div class="modal-actions"><button class="btn btn-outline" onclick="App.closeModalForce()">بستن</button></div>
     `);
   }

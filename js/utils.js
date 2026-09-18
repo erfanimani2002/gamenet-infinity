@@ -267,10 +267,11 @@ const Utils = (function () {
     return options;
   }
 
-  async function renderSettlerSelect(selected) {
+  async function renderSettlerSelect(selected, selectId) {
     let options = await getSettlerOptions();
-    let html = `<select id="settlerSelect">
-        ${options.map((o) => `<option value="${o.value}" ${o.value === selected ? 'selected' : ''}>${o.label}</option>`).join("")}
+    let safeId = selectId || "settlerSelect";
+    let html = `<select id="${safeId}">
+        ${options.map((o) => `<option value="${o.value}" ${o.value === selected ? 'selected' : ''}>${Utils.escapeHtml(o.label)}</option>`).join("")}
       </select>`;
     return html;
   }
@@ -329,7 +330,7 @@ const Utils = (function () {
       let idLabel = String(c.displayId || c.id);
       let fullName = ((c.firstName || "") + " " + (c.lastName || "")).trim();
       let label = fullName ? fullName + " (#" + idLabel + ")" : "#" + idLabel;
-      return `<option value="${c.id}" ${c.id === selected ? 'selected' : ''} data-search="${idLabel}">${label}</option>`;
+      return `<option value="${c.id}" ${c.id === selected ? 'selected' : ''} data-search="${Utils.escapeHtml(idLabel)}">${Utils.escapeHtml(label)}</option>`;
     }).join("");
     return `
       <input type="text" placeholder="جستجوی شناسه..." style="width:100%;margin-bottom:4px;padding:6px 8px;border:1px solid var(--border);border-radius:var(--radius-sm);font-size:12px;box-sizing:border-box;" oninput="Utils.filterPayerSelect(this)">
@@ -373,10 +374,10 @@ const Utils = (function () {
     categories.forEach((cat) => {
       let frac = sum > 0 ? (cb[cat] || 0) / sum : (cat === categories[categories.length - 1] ? 1 : 0);
       result[cat] = {
-        cash: (overallLegs.cash || 0) * frac,
-        card: (overallLegs.card || 0) * frac,
-        wallet: (overallLegs.wallet || 0) * frac,
-        debt: (overallLegs.debt || 0) * frac,
+        cash: Math.round((overallLegs.cash || 0) * frac),
+        card: Math.round((overallLegs.card || 0) * frac),
+        wallet: Math.round((overallLegs.wallet || 0) * frac),
+        debt: Math.round((overallLegs.debt || 0) * frac),
       };
     });
     return result;

@@ -46,7 +46,8 @@ const Auth = (function () {
     if (currentUser) return currentUser;
     var saved = sessionStorage.getItem("gnet_user");
     if (saved) {
-      currentUser = JSON.parse(saved);
+      try { currentUser = JSON.parse(saved); }
+      catch (e) { sessionStorage.removeItem("gnet_user"); return null; }
       return currentUser;
     }
     return null;

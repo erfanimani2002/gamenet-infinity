@@ -124,7 +124,7 @@ const AdminPanel = (function () {
           ${users.map((u) => `
             <div class="list-row">
               <span class="row-value">${Utils.escapeHtml(u.username)}</span>
-              <span class="row-value">${u.role === 'manager' ? 'مدیر' : 'ادمین'}</span>
+              <span class="row-value">${{ manager: 'مدیر', admin: 'ادمین' }[u.role] || u.role}</span>
               <span class="row-value">${Utils.escapeHtml(u.name)}</span>
             </div>
           `).join("")}
@@ -154,7 +154,7 @@ const AdminPanel = (function () {
       },
       pcRate: v("pcRate", 3000),
       roundingUnit: v("roundingUnit", 1000),
-      overnightEntranceFee: v("overnightEntranceFee", 0),
+      overnightEntranceFee: v("overnightEntranceFee", 100000),
     };
     await DB.setSetting("pricing", pricing);
     await DB.logActivity("ذخیره قیمت‌ها", "نرخ‌ها به‌روزرسانی شد");
@@ -164,7 +164,8 @@ const AdminPanel = (function () {
   async function addDevice(type) {
     let names = { console: "کنسول", billiard: "میز بیلیارد", pc: "پی‌سی" };
     let devices = await DB.getAll("devices");
-    let count = devices.filter((d) => d.type === type).length + 1;
+    let existingNums = devices.filter((d) => d.type === type).map((d) => parseInt(d.name.match(/\d+$/)) || 0);
+    let count = (existingNums.length ? Math.max(...existingNums) : 0) + 1;
 
     await DB.add("devices", {
       name: names[type] + " " + count,
@@ -179,6 +180,7 @@ const AdminPanel = (function () {
 
   async function editDevice(id) {
     let device = await DB.get("devices", id);
+    if (!device) { App.toast("دستگاه یافت نشد"); return; }
     App.openModal(`
       <h2>ویرایش ${Utils.escapeHtml(device.name)}</h2>
       <div class="form-group"><label>نام</label><input type="text" id="editDevName" value="${Utils.escapeHtml(device.name)}"></div>
@@ -191,6 +193,7 @@ const AdminPanel = (function () {
 
   async function saveDevice(id) {
     let device = await DB.get("devices", id);
+    if (!device) { App.toast("دستگاه یافت نشد"); return; }
     device.name = document.getElementById("editDevName").value.trim();
     await DB.put("devices", device);
     await DB.logActivity("ویرایش دستگاه", device.name);
@@ -237,7 +240,7 @@ const AdminPanel = (function () {
 
   async function saveUser() {
     let username = document.getElementById("newUsername").value.trim();
-    let password = document.getElementById("newPassword").value.trim();
+    let password = document.getElementById("newPassword").value;
     let name = document.getElementById("newName").value.trim();
     let role = document.getElementById("newRole").value;
     if (!username || !password) { App.toast("نام کاربری و رمز عبور الزامی است"); return; }

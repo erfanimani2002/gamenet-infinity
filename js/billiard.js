@@ -499,7 +499,7 @@ const Billiard = (function () {
       <h3>کافی‌شاپ</h3>
       <div class="pick-list">${cafeItems.map((item) => `<div class="pick-item" onclick="Billiard.addItemClick(${deviceId}, ${item.id}, 'cafe')"><span class="pick-name">${Utils.escapeHtml(item.name)}</span><span class="pick-meta">${Utils.formatCurrency(item.price)}</span></div>`).join("")}</div>
       <h3 style="margin-top:12px">جریمه/تخفیف</h3>
-      <div class="pick-list">${penalties.map((item) => `<div class="pick-item" onclick="Billiard.addItemClick(${deviceId}, ${item.id}, 'penalty')"><span class="pick-name">${Utils.escapeHtml(item.name)}</span></div>`).join("")}</div>
+      <div class="pick-list">${penalties.map((item) => `<div class="pick-item" onclick="Billiard.addItemClick(${deviceId}, ${item.id}, 'penalty')"><span class="pick-name">${Utils.escapeHtml(item.name)}</span><span class="pick-meta">${Utils.formatCurrency(item.amount)}</span></div>`).join("")}</div>
       <div class="modal-actions"><button class="btn btn-outline" onclick="App.closeModalForce()">بستن</button></div>
     `);
   }
@@ -640,6 +640,7 @@ const Billiard = (function () {
       lastBlock.price = Utils.roundPrice(hours * lastBlock.rate, pricing.roundingUnit || 1000);
     }
     let targetDevice = await DB.get("devices", targetId);
+    if (!targetDevice) { App.toast("دستگاه مقصد یافت نشد"); return; }
     let pricing = await DB.getSetting("pricing", {});
     // Look up the rate fresh for the destination device type instead of
     // reusing the source device's controllerCount, which has no meaning on
@@ -654,7 +655,7 @@ const Billiard = (function () {
       { store: "devices", type: "put", data: { ...targetDevice, status: "busy" } },
     ]);
     await DB.logActivity("جابه‌جایی سشن بیلیارد", "سشن #" + session.id + " از " + oldDevice.name + " به " + targetDevice.name);
-    App.stopTimer("timer-billiard-" + deviceId); App.closeModalForce(); refresh();
+    App.stopTimer("timer-billiard-" + deviceId); App.closeModalForce(); App.toast("جابه‌جایی انجام شد"); refresh();
   }
 
   async function cancelSession(deviceId) {

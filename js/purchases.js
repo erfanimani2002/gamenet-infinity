@@ -103,10 +103,11 @@ const Purchases = (function () {
   async function savePurchase() {
     let category = document.getElementById("purCategory").value;
     let description = document.getElementById("purDesc").value.trim();
-    let amount = Math.round(parseFloat(document.getElementById("purAmount").value) || 0);
+    let rawAmount = parseFloat(document.getElementById("purAmount").value);
+    let amount = Math.round(rawAmount);
+    if (!Number.isFinite(amount) || amount <= 0) { App.toast("مبلغ نامعتبر"); return; }
     let payType = document.getElementById("purPayType").value;
     let thirdParty = document.getElementById("purThirdParty")?.value.trim() || "";
-    if (amount <= 0) { App.toast("مبلغ نامعتبر"); return; }
     // TODO(fridge stock): a "fridge" purchase currently just records the expense.
     // It should optionally let the user pick a cafe item to increment inventory,
     // but that UI is deferred — we deliberately do NOT fake/auto-increment stock.

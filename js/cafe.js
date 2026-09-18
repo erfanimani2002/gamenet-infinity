@@ -274,7 +274,6 @@ const Cafe = (function () {
   function refresh() {
     let el = document.getElementById("tab-cafe");
     if (el && el.classList.contains("active")) {
-      cart = [];
       render(el);
     }
   }

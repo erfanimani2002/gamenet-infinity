@@ -49,6 +49,7 @@ const Staff = (function () {
 
   async function startShift(staffId) {
     let staff = await DB.get("staff", staffId);
+    if (!staff) { App.toast("پرسنل یافت نشد"); return; }
     if (!staff.shifts) staff.shifts = [];
     let active = staff.shifts.find((s) => !s.end);
     if (active) { App.toast("این پرسنل از قبل شیفت باز دارد"); return; }
@@ -60,18 +61,23 @@ const Staff = (function () {
 
   async function endShift(staffId) {
     let staff = await DB.get("staff", staffId);
+    if (!staff) { App.toast("پرسنل یافت نشد"); return; }
     let active = staff.shifts.find((s) => !s.end);
     if (active) {
       active.end = new Date().toISOString();
       await DB.put("staff", staff);
       let hours = (new Date(active.end) - new Date(active.start)) / 3600000;
       await DB.logActivity("پایان شیفت", staff.name + " - " + hours.toFixed(1) + " ساعت");
+      App.toast("شیفت تمام شد");
+    } else {
+      App.toast("شیفت فعالی وجود ندارد");
     }
-    App.toast("شیفت تمام شد"); refresh();
+    refresh();
   }
 
   async function showStaffDetail(staffId) {
     let staff = await DB.get("staff", staffId);
+    if (!staff) { App.toast("پرسنل یافت نشد"); return; }
 
     App.openModal(`
       <h2>${Utils.escapeHtml(staff.name)}</h2>
@@ -91,11 +97,14 @@ const Staff = (function () {
 
   async function showActivityTab(staffId) {
     let staff = await DB.get("staff", staffId);
+    if (!staff) { App.toast("پرسنل یافت نشد"); return; }
     let todayShift = (staff.shifts || []).find((s) => !s.end);
 
     let cafeItems = await DB.getAll("cafeItems");
 
-    document.getElementById("staffTabContent").innerHTML = `
+    let content = document.getElementById("staffTabContent");
+    if (!content) return;
+    content.innerHTML = `
       <div id="activitySection">
         <div style="margin-bottom:12px;">
           ${todayShift ?
@@ -133,6 +142,7 @@ const Staff = (function () {
 
   async function showStatsTab(staffId) {
     let staff = await DB.get("staff", staffId);
+    if (!staff) { App.toast("پرسنل یافت نشد"); return; }
     let now = new Date();
     let jalaliToday = Jalali.getTodayJalali();
 
@@ -173,7 +183,9 @@ const Staff = (function () {
 
     let totalConsumption = monthlyConsumption.reduce((s, c) => s + (c.price * c.qty), 0);
 
-    document.getElementById("staffTabContent").innerHTML = `
+    let content = document.getElementById("staffTabContent");
+    if (!content) return;
+    content.innerHTML = `
       <div id="statsSection">
         <h3>آمار ماه جاری (${jalaliToday.year}/${jalaliToday.month})</h3>
         <div class="list-row"><span class="row-label">ساعات کار امروز</span><span class="row-value font-bold">${todayHours.toFixed(1)} ساعت</span></div>

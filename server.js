@@ -19,6 +19,7 @@ const MIME = {
   ".woff2": "font/woff2",
   ".ttf": "font/ttf",
   ".json": "application/json",
+  ".gif": "image/gif",
 };
 
 fs.mkdirSync(BACKUP_DIR, { recursive: true });
@@ -61,7 +62,7 @@ http.createServer((req, res) => {
           name = parsed._name.replace(/[^a-zA-Z0-9._-]/g, "");
           if (!name.endsWith(".json")) name += ".json";
         } else {
-          name = "gamenet-" + new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-") + ".json";
+          name = "gamenet-" + new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-") + "-" + Math.random().toString(36).slice(2, 6) + ".json";
         }
         const file = path.join(BACKUP_DIR, name);
         if (!file.startsWith(BACKUP_DIR)) {

@@ -239,7 +239,7 @@ const Consoles = (function () {
     }
 
     let pricing = await DB.getSetting("pricing", {});
-    let rates = pricing.consoleRates || {};
+    let rates = pricing.consoleRates || { 1: 5000, 2: 7000, 3: 9000, 4: 11000 };
     let rate = rates[session.controllerCount] || rates[1];
 
     session.timeBlocks.push({ startTime: new Date().toISOString(), endTime: null, rate, controllerCount: session.controllerCount, deviceType: session.deviceType || "console", deviceId: session.deviceId, price: 0 });
@@ -759,6 +759,7 @@ const Consoles = (function () {
     }
 
     let targetDevice = await DB.get("devices", targetId);
+    if (!targetDevice) { App.toast("دستگاه مقصد یافت نشد"); return; }
     let pricing = await DB.getSetting("pricing", {});
     // The destination device type has its own pricing/count semantics (e.g. a
     // billiard table's rate is keyed by cue count, not the console's

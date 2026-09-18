@@ -226,7 +226,7 @@ const Backup = (function () {
       a.href = url;
       a.download = "گیمنت_اینفینیتی_بک‌آپ_" + Jalali.formatDate(new Date()).replace(/\//g, "-") + ".json";
       a.click();
-      setTimeout(function () { URL.revokeObjectURL(url); }, 100);
+      setTimeout(function () { URL.revokeObjectURL(url); }, 5000);
       await DB.logActivity("بک‌آپ JSON", "خروجی کامل داده‌ها");
       App.toast("بک‌آپ دانلود شد");
     } catch (e) {
@@ -253,13 +253,20 @@ const Backup = (function () {
       let text = await file.text();
       let data;
       try {
-        data = JSON.parse(text);
-      } catch (parseErr) {
-        App.toast("فایل معتبر نیست — فایل JSON صحیح انتخاب کنید");
-        event.target.value = "";
-        return;
-      }
-      let result = await DB.importAll(data);
+      data = JSON.parse(text);
+    } catch (parseErr) {
+      App.toast("فایل معتبر نیست — فایل JSON صحیح انتخاب کنید");
+      event.target.value = "";
+      return;
+    }
+    let expectedStores = ["sessions", "customers", "devices", "users"];
+    let hasGamenetData = expectedStores.some((store) => data[store] && Array.isArray(data[store]));
+    if (!hasGamenetData) {
+      App.toast("فایل انتخابی یک پشتیبان گیم‌نت نیست");
+      event.target.value = "";
+      return;
+    }
+    let result = await DB.importAll(data);
       await DB.logActivity("بازیابی بک‌آپ", "بازیابی از فایل JSON");
       if (result && result.errors && result.errors.length > 0) {
         App.toast("بازیابی انجام شد اما " + result.errors.length + " رکورد با خطا مواجه شد. جزئیات در کنسول.");

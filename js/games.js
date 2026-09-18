@@ -19,7 +19,8 @@ const Games = (function () {
       </div>
     `;
     el.innerHTML = html;
-    renderSubTab(document.getElementById("gamesContent"), games, devices);
+    let contentEl = document.getElementById("gamesContent");
+    if (contentEl) renderSubTab(contentEl, games, devices);
   }
 
   function renderSubTab(container, games, devices) {
@@ -150,6 +151,7 @@ const Games = (function () {
   async function deleteGame(id) {
     if (!confirm("آیا از حذف این بازی مطمئن هستید؟")) return;
     let game = await DB.get("games", id);
+    if (!game) { App.toast("بازی یافت نشد"); return; }
     let devices = await DB.getAll("devices");
     for (let d of devices) {
       if ((d.games || []).includes(id)) {

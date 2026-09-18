@@ -60,12 +60,14 @@ const Jalali = (function () {
 
   function formatDate(date) {
     var d = date instanceof Date ? date : new Date(date);
+    if (isNaN(d.getTime())) return "تاریخ نامعتبر";
     var j = gregorianToJalali(d.getFullYear(), d.getMonth() + 1, d.getDate());
     return j.year + "/" + String(j.month).padStart(2, "0") + "/" + String(j.day).padStart(2, "0");
   }
 
   function formatDateTime(date) {
     var d = date instanceof Date ? date : new Date(date);
+    if (isNaN(d.getTime())) return "تاریخ نامعتبر";
     var j = gregorianToJalali(d.getFullYear(), d.getMonth() + 1, d.getDate());
     var h = String(d.getHours()).padStart(2, "0");
     var m = String(d.getMinutes()).padStart(2, "0");

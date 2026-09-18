@@ -101,6 +101,7 @@ const Reports = (function () {
       else if (p.paymentType === "pasargad") purchaseCard += p.amount;
       else if (p.paymentType === "other" && !p.settled) purchaseOther += p.amount;
       else if (p.paymentType !== "other") purchaseOther += p.amount;
+      else if (p.paymentType === "other" && p.settled && !p.settledWith) purchaseOther += p.amount;
     });
     purchases.filter((p) => p.paymentType === "other" && p.settled && p.settledWith && Utils.isInRange(p.settledAt, range.start, range.end)).forEach((p) => {
       let eff = p.settledWith;
@@ -503,6 +504,7 @@ const Reports = (function () {
       tournaments: await DB.getAll("tournaments"),
       matches: await DB.getAll("matches"),
       prizePayouts: await DB.getAll("prizePayouts"),
+      overnightTransactions: await DB.getAll("overnightTransactions"),
     };
 
     for (let i = 0; i <= 31; i++) {
@@ -660,7 +662,7 @@ const Reports = (function () {
     all.sort((a, b) => new Date(b.time) - new Date(a.time));
 
     App.openModal(`<h2>لیست تراکنش‌ها</h2><div style="max-height:400px;overflow-y:auto;">
-      ${all.map((t) => `<div class="list-row"><span class="row-label">${t.type}</span><span class="row-value">${t.device} | ${t.ids}</span><span class="row-value amount">${Utils.formatCurrency(t.amount)}</span><span class="text-muted text-sm">${t.payType} | ${Jalali.formatDateTime(t.time)}</span>${t.txType === "overnight" ? `<span class="text-muted text-sm">غیرقابل‌ویرایش</span>` : `<button class="btn btn-sm btn-outline" onclick="Reports.editTransaction('${t.txType}', ${t.txId})">ویرایش</button>`}</div>`).join("")}
+      ${all.map((t) => `<div class="list-row"><span class="row-label">${t.type}</span><span class="row-value">${t.device} | ${t.ids}</span><span class="row-value amount">${Utils.formatCurrency(t.amount)}</span><span class="text-muted text-sm">${t.payType} | ${Jalali.formatDateTime(t.time)}</span>${t.txType === "overnight" ? `<span class="text-muted text-sm">غیرقابل‌ویرایش</span>` : `<button class="btn btn-sm btn-outline" onclick="Reports.editTransaction('${t.txType}', ${parseInt(t.txId) || 0})">ویرایش</button>`}</div>`).join("")}
     </div><div class="modal-actions"><button class="btn btn-outline" onclick="App.closeModalForce()">بستن</button></div>`);
   }
 
@@ -1154,6 +1156,7 @@ const Reports = (function () {
             match.settleAmount = null;
             match.settlerName = null;
             match.settledAt = null;
+            match.payBreakdown = null;
             ops.push({ store: "matches", type: "put", data: match });
           }
         }
@@ -1214,6 +1217,7 @@ const Reports = (function () {
   // session/order items) and fall back to name for records predating itemId.
   async function restoreCafeStock(items) {
     let cafeItems = await DB.getAll("cafeItems");
+    let ops = [];
     for (let it of items) {
       let cafeItem = it.itemId != null
         ? cafeItems.find((ci) => ci.id === it.itemId)
@@ -1221,9 +1225,10 @@ const Reports = (function () {
       if (cafeItem && !cafeItem.unlimited) {
         cafeItem.stock += (it.qty || 1);
         cafeItem.stock = Math.max(0, cafeItem.stock);
-        await DB.put("cafeItems", cafeItem);
+        ops.push({ store: "cafeItems", type: "put", data: cafeItem });
       }
     }
+    if (ops.length) await DB.runAtomic(ops);
   }
 
   async function exportDailyExcel() {

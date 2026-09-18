@@ -130,7 +130,7 @@ const CustomerClub = (function () {
     let filtered = customers.filter((c) => {
       if (currentSearch) {
         let q = currentSearch.toLowerCase();
-        let name = (c.firstName + " " + c.lastName).toLowerCase();
+        let name = ((c.firstName || "") + " " + (c.lastName || "")).toLowerCase();
         let did = String(c.displayId || c.id);
         if (!name.includes(q) && !did.includes(q)) return false;
       }

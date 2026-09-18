@@ -41,6 +41,7 @@ const Penalties = (function () {
     let amount = Math.round(parseFloat(document.getElementById("penAmount").value) || 0);
     let type = document.getElementById("penType").value;
     if (!name) { App.toast("نام الزامی است"); return; }
+    if (!Number.isFinite(amount) || amount <= 0) { App.toast("مبلغ نامعتبر"); return; }
 
     await DB.add("penaltyItems", { name, amount, type });
     await DB.logActivity("افزودن آیتم جریمه/تخفیف", name + " (" + (type === 'penalty' ? 'جریمه' : 'تخفیف') + ")");
@@ -51,6 +52,7 @@ const Penalties = (function () {
 
   async function showEditItem(id) {
     let item = await DB.get("penaltyItems", id);
+    if (!item) { App.toast("آیتم یافت نشد"); return; }
     App.openModal(`
       <h2>ویرایش آیتم</h2>
       <div class="form-group"><label>نام</label><input type="text" id="editPenName" value="${Utils.escapeHtml(item.name)}"></div>

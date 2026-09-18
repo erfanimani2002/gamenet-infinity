@@ -340,6 +340,8 @@ const App = (function () {
         case "overnight":
           Overnight.render(document.getElementById("tab-overnight"));
           break;
+        default:
+          console.warn("Unknown tab:", tab);
       }
     } catch (err) {
       console.error("Error rendering tab:", tab, err);
@@ -389,12 +391,15 @@ const App = (function () {
     if (lastFocusedElement) { lastFocusedElement.focus(); lastFocusedElement = null; }
   }
 
+  let toastTimeout;
   function toast(msg) {
     let t = document.getElementById("toast");
+    if (toastTimeout) clearTimeout(toastTimeout);
     t.textContent = msg;
     t.style.display = "block";
-    setTimeout(() => {
+    toastTimeout = setTimeout(() => {
       t.style.display = "none";
+      toastTimeout = null;
     }, 2500);
   }
 
@@ -417,9 +422,10 @@ const App = (function () {
     let el = document.createElement("div");
     el.className = "persistent-warning";
     el.dataset.warningKey = key;
+    let safeKey = key.replace(/[^a-zA-Z0-9_-]/g, "");
     el.innerHTML = `
       <div class="persistent-warning-body">${html}</div>
-      <button class="persistent-warning-close" onclick="App.clearPersistentWarning('${key}')" title="بستن">×</button>
+      <button class="persistent-warning-close" onclick="App.clearPersistentWarning('${safeKey}')" title="بستن">×</button>
     `;
     container.appendChild(el);
   }

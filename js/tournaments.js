@@ -261,13 +261,10 @@ const Tournaments = (function () {
     // their row removed — we do NOT fabricate cash back into the till.
     let prizePayouts = (await DB.getAll("prizePayouts")).filter((p) => p.tournamentId === id);
     for (let p of prizePayouts) {
-      if (p.payType === "wallet" && p.customerId) {
-        let winner = await DB.get("customers", p.customerId);
-        if (winner) {
-          winner.wallet = Math.max(0, (winner.wallet || 0) - (p.amount || 0));
-          await DB.put("customers", winner);
-        }
-      }
+      // Remove associated purchase record if it exists
+      let purchases = await DB.getAll("purchases");
+      let purchase = purchases.find((pur) => pur.note && pur.note.includes(t.name || "") && pur.amount === p.amount);
+      if (purchase) await DB.remove("purchases", purchase.id);
       await DB.remove("prizePayouts", p.id);
     }
 
@@ -283,6 +280,7 @@ const Tournaments = (function () {
   async function changeStatus(id, newStatus) {
     let t = await DB.get("tournaments", id);
     if (!t) return;
+    if (!STATUS[newStatus]) { App.toast("وضعیت نامعتبر"); return; }
     t.status = newStatus;
     await DB.put("tournaments", t);
     await DB.logActivity("تغییر وضعیت مسابقه", t.name + " → " + STATUS[newStatus].label);
@@ -965,9 +963,12 @@ const Tournaments = (function () {
     if (match.deviceId) {
       let tournament = await DB.get("tournaments", match.tournamentId);
       let pricing = await DB.getSetting("pricing", {});
-      let rate = tournament.pcRateManual || 0;
+      let device = await DB.get("devices", match.deviceId);
+      let rate = 0;
+      if (device && device.type === "pc") {
+        rate = tournament.pcRateManual || 0;
+      }
       if (!rate) {
-        let device = await DB.get("devices", match.deviceId);
         if (device && device.type === "console") {
           rate = (pricing.consoleRates || {})[1] || 5000;
         } else if (device && device.type === "billiard") {

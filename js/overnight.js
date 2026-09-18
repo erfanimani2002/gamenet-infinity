@@ -260,7 +260,7 @@ const Overnight = (function () {
     await Utils.guardDoubleClick(async () => {
       let customerId = parseInt(document.getElementById("newResCustomer").value) || 0;
       let type = document.getElementById("newResType").value;
-      let baseFee = parseInt(document.getElementById("newResFee").value) || 0;
+      let baseFee = Math.max(0, parseInt(document.getElementById("newResFee").value) || 0);
       let notes = document.getElementById("newResNotes").value.trim();
       if (!customerId) { App.toast("مشتری را انتخاب کنید"); return { success: false }; }
 
@@ -333,7 +333,7 @@ const Overnight = (function () {
         <span class="row-value">${t.type === "payment" ? "پرداخت" : t.type === "refund" ? "استرداد" : "بخشش مانده (لغو)"}</span>
         <span class="row-value amount ${t.type === "refund" ? "negative" : ""}">${Utils.formatCurrency(t.amount)}</span>
         <span class="row-value">${t.payType ? payTypeLabel(t.payType) : "—"}</span>
-        <span class="text-muted text-sm">${t.settlerName || ""}</span>
+        <span class="text-muted text-sm">${Utils.escapeHtml(t.settlerName || "")}</span>
         <span class="text-muted text-sm">${Jalali.formatDateTime(new Date(t.timestamp))}</span>
       </div>
     `).join("");
@@ -669,11 +669,23 @@ const Overnight = (function () {
       reservation.status = "completed";
       reservation.checkOut = new Date().toISOString();
 
-      await DB.runAtomic([
+      let ops = [
         { store: "customers", type: "put", data: payResult.customer },
         { store: "overnightTransactions", type: "add", data: tx },
         { store: "overnightReservations", type: "put", data: reservation },
-      ]);
+      ];
+
+      // If payment is less than remaining balance, create a writeoff for the unpaid portion
+      let remainingAfter = (reservation.totalCharges || 0) - amount;
+      if (remainingAfter > 0) {
+        ops.push({ store: "overnightTransactions", type: "add", data: {
+          reservationId: id, customerId: reservation.customerId, type: "writeoff",
+          amount: remainingAfter, payType: "writeoff", categoryBreakdown: {},
+          settlerName, timestamp: new Date().toISOString(), status: "active",
+        } });
+      }
+
+      await DB.runAtomic(ops);
       await DB.logActivity("تسویه رزرو شب", "رزرو #" + id + " | " + Utils.formatCurrency(amount) + " | " + payResult.payType + " | " + settlerName);
       App.toast("رزرو تسویه شد");
       viewReservation(id);
@@ -781,15 +793,17 @@ const Overnight = (function () {
 
     let allTx = await getTransactionsFor(id);
 
-    // Restore cafe item stock
+    // Restore cafe item stock — skip if already restocked by cancelReservation
     let cafeItemChanges = {};
     let cafeItems = await DB.getAll("cafeItems");
-    for (let it of reservation.items || []) {
-      if (it.type === "cafe" && it.itemId != null) {
-        let ci = cafeItems.find((c) => c.id === it.itemId);
-        if (ci && !ci.unlimited) {
-          if (!cafeItemChanges[ci.id]) cafeItemChanges[ci.id] = { ...ci };
-          cafeItemChanges[ci.id].stock += it.qty || 1;
+    if (reservation.status !== "cancelled") {
+      for (let it of reservation.items || []) {
+        if (it.type === "cafe" && it.itemId != null) {
+          let ci = cafeItems.find((c) => c.id === it.itemId);
+          if (ci && !ci.unlimited) {
+            if (!cafeItemChanges[ci.id]) cafeItemChanges[ci.id] = { ...ci };
+            cafeItemChanges[ci.id].stock += it.qty || 1;
+          }
         }
       }
     }
