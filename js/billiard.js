@@ -348,12 +348,18 @@ const Billiard = (function () {
 
     let totalBlocks = session.timeBlocks.filter((b) => !b.settled).reduce((s, b) => s + (b === lastBlock ? (projectedOpenBlockPrice || 0) : (b.price || 0)), 0);
     let totalItems = (session.items || []).reduce((s, i) => s + (i.price * i.qty), 0);
-    let total = totalBlocks + totalItems;
-    let discount = 0;
+    // Discount only applies to time cost, never to items — and rounding is
+    // applied AFTER the discount is subtracted (not before), so the customer's
+    // final time cost lands on a round number.
+    let pricingPreview = await DB.getSetting("pricing", {});
+    let discountPct = 0;
     if (session.ids && session.ids.length > 0) {
       let mc = await DB.get("customers", session.ids[0]);
-      if (mc) discount = Math.round(total * await Utils.getEffectiveDiscount(mc) / 100);
+      if (mc) discountPct = await Utils.getEffectiveDiscount(mc);
     }
+    let discountedTime = Utils.roundPrice(Math.max(0, totalBlocks - Math.round(totalBlocks * discountPct / 100)), pricingPreview.roundingUnit || 1000);
+    let discount = totalBlocks - discountedTime;
+    let total = discountedTime + totalItems;
 
     let customers = await DB.getAll("customers");
     let defaultPayerId = (session.ids || [])[0];
@@ -363,13 +369,13 @@ const Billiard = (function () {
       <h2>تسویه کل سشن بیلیارد</h2>
       <div class="list-row"><span class="row-label">زمان</span><span class="row-value">${Utils.formatCurrency(totalBlocks)}</span></div>
       <div class="list-row"><span class="row-label">آیتم</span><span class="row-value">${Utils.formatCurrency(totalItems)}</span></div>
-      ${discount > 0 ? `<div class="list-row"><span class="row-label">تخفیف</span><span class="row-value amount positive">-${Utils.formatCurrency(discount)}</span></div>` : ''}
-      <div class="list-row font-bold text-lg"><span class="row-label">کل</span><span class="row-value amount">${Utils.formatCurrency(total - discount)}</span></div>
+      ${discount > 0 ? `<div class="list-row"><span class="row-label">تخفیف (فقط روی زمان)</span><span class="row-value amount positive">-${Utils.formatCurrency(discount)}</span></div>` : ''}
+      <div class="list-row font-bold text-lg"><span class="row-label">کل</span><span class="row-value amount">${Utils.formatCurrency(total)}</span></div>
       <div class="form-group"><label>پرداخت‌کننده</label>${Utils.renderPayerSelect(customers, defaultPayerId, "payerId")}</div>
-<div class="form-group"><label>روش پرداخت</label><select id="settlePayType" onchange="Billiard.toggleCombinedPayment('settlePayType', 'combinedFieldsSession', ${total - discount})"><option value="wallet">کیف‌پول</option><option value="debt">بدهکاری</option><option value="cash">نقدی</option><option value="card">کارتی</option><option value="combined">ترکیبی (نقدی + کارتی)</option></select></div>
+<div class="form-group"><label>روش پرداخت</label><select id="settlePayType" onchange="Billiard.toggleCombinedPayment('settlePayType', 'combinedFieldsSession', ${total})"><option value="wallet">کیف‌پول</option><option value="debt">بدهکاری</option><option value="cash">نقدی</option><option value="card">کارتی</option><option value="combined">ترکیبی (نقدی + کارتی)</option></select></div>
 <div id="combinedFieldsSession" style="display:none; margin-top:8px;">
-  <div class="form-group"><label>مبلغ کارتی</label><input type="number" id="bCombinedCardAmountSession" min="0" oninput="Billiard.updateCombinedCheck('bCombinedCardAmountSession', 'bCombinedCashAmountSession', 'bCombinedCheckSession', ${total - discount})"></div>
-  <div class="form-group"><label>مبلغ نقدی</label><input type="number" id="bCombinedCashAmountSession" min="0" oninput="Billiard.updateCombinedCheck('bCombinedCardAmountSession', 'bCombinedCashAmountSession', 'bCombinedCheckSession', ${total - discount})"></div>
+  <div class="form-group"><label>مبلغ کارتی</label><input type="number" id="bCombinedCardAmountSession" min="0" oninput="Billiard.updateCombinedCheck('bCombinedCardAmountSession', 'bCombinedCashAmountSession', 'bCombinedCheckSession', ${total})"></div>
+  <div class="form-group"><label>مبلغ نقدی</label><input type="number" id="bCombinedCashAmountSession" min="0" oninput="Billiard.updateCombinedCheck('bCombinedCardAmountSession', 'bCombinedCashAmountSession', 'bCombinedCheckSession', ${total})"></div>
   <div id="bCombinedCheckSession" class="text-sm" style="margin-top:4px;"></div>
 </div>
 <div class="form-group"><label>تسویه‌کننده</label>${settlerHtml}</div>
@@ -402,14 +408,20 @@ const Billiard = (function () {
       let unsettledBlocks = session.timeBlocks.filter((b) => !b.settled);
       let blockTotal = unsettledBlocks.reduce((s, b) => s + (b.price || 0), 0);
       let itemsTotal = (session.items || []).reduce((s, i) => s + (i.price * i.qty), 0);
-      let gross = blockTotal + itemsTotal;
 
-      let discount = 0;
+      // Discount only applies to time cost, never to items — and rounding is
+      // applied AFTER the discount is subtracted, so the final time cost lands
+      // on a round number instead of the discount leaving an odd remainder.
+      let pricingForDiscount = await DB.getSetting("pricing", {});
+      let discountPct = 0;
       if (session.ids && session.ids.length > 0) {
         let mc = await DB.get("customers", session.ids[0]);
-        if (mc) discount = Math.round(gross * await Utils.getEffectiveDiscount(mc) / 100);
+        if (mc) discountPct = await Utils.getEffectiveDiscount(mc);
       }
-      let finalAmount = Math.max(0, gross - discount);
+      let discountedTime = Utils.roundPrice(Math.max(0, blockTotal - Math.round(blockTotal * discountPct / 100)), pricingForDiscount.roundingUnit || 1000);
+      let discount = blockTotal - discountedTime;
+      let gross = blockTotal + itemsTotal;
+      let finalAmount = discountedTime + itemsTotal;
 
       if (payType === "combined") {
         let cardAmt = parseInt(document.getElementById("bCombinedCardAmountSession").value) || 0;

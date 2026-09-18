@@ -421,7 +421,10 @@ const Overnight = (function () {
           }
         } else {
           if (!item.unlimited && item.stock <= 0) { App.toast("موجودی تمام شده"); return { success: false }; }
-          let price = applyDiscountPct(item.price, reservation.discountPercent || 0);
+          // Cafe items are never discounted — only the entrance fee is (see
+          // the entranceFee calc at reservation creation), same rule as every
+          // other cafe purchase in the app.
+          let price = item.price;
           reservation.items.push({ itemId, name: item.name, price, qty: 1, type: "cafe", addedAt: new Date().toISOString() });
           if (!item.unlimited) {
             ops.push({ store: "cafeItems", type: "put", data: { ...item, stock: item.stock - 1 } });
