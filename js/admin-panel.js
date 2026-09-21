@@ -404,5 +404,5 @@ const AdminPanel = (function () {
     if (el && el.classList.contains("active")) render(el);
   }
 
-  return { render, savePricing, saveCustomerClub, addClubCategory, removeClubCategory, addDevice, editDevice, saveDevice, deleteDevice, addUser, saveUser, saveStaffPin, refresh };
+  return { render, savePricing, saveCustomerClub, addClubCategory, removeClubCategory, addDevice, editDevice, saveDevice, deleteDevice, addUser, saveUser, deleteUser, saveStaffPin, refresh };
 })();
