@@ -2603,3 +2603,157 @@ canvas {
   min-height: 16px;
   line-height: 1.4;
 }
+
+/* =====================================================
+   TRANSACTION LIST (Reports.showFullTransactions)
+   ===================================================== */
+.tx-summary {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.tx-summary-item {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  align-items: center;
+  padding: 10px 8px;
+  background: var(--bg-sunken);
+  border-radius: var(--radius);
+  border: 1px solid var(--border-light);
+}
+
+.tx-summary-item .amount { font-size: 15px; }
+
+.tx-filters {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  padding-bottom: 10px;
+  margin-bottom: 8px;
+  border-bottom: 1px solid var(--border-light);
+}
+
+.tx-chip {
+  flex-shrink: 0;
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 600;
+  padding: 6px 14px;
+  border-radius: var(--radius-full);
+  cursor: pointer;
+  transition: background var(--duration) var(--ease), color var(--duration) var(--ease), border-color var(--duration) var(--ease);
+}
+
+.tx-chip:hover { background: var(--bg-hover); }
+
+.tx-chip.active {
+  background: var(--accent-gradient);
+  border-color: var(--accent);
+  color: #000;
+}
+
+.tx-list {
+  max-height: 55vh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 2px;
+}
+
+.tx-date-heading {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-muted);
+  padding: 10px 4px 2px;
+}
+
+.tx-card {
+  display: flex;
+  gap: 10px;
+  padding: 10px;
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius);
+  background: var(--bg-card);
+  animation: staggerIn var(--duration-md) var(--ease) both;
+}
+
+.tx-card:hover {
+  background: var(--bg-hover);
+  border-color: var(--border-strong);
+}
+
+.tx-icon {
+  flex-shrink: 0;
+  width: 38px;
+  height: 38px;
+  border-radius: var(--radius);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  background: var(--bg-sunken);
+}
+
+.tx-icon.tx-session { background: var(--accent-bg); }
+.tx-icon.tx-order { background: var(--warning-bg); }
+.tx-icon.tx-block { background: var(--success-bg); }
+.tx-icon.tx-overnight { background: rgba(139, 92, 246, 0.14); }
+
+.tx-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.tx-top {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.tx-title {
+  font-weight: 600;
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tx-top .amount { font-size: 14px; white-space: nowrap; }
+
+.tx-sub {
+  font-size: 12px;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tx-bottom {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 2px;
+}
+
+.tx-pay-badge {
+  background: var(--bg-sunken);
+  color: var(--text-muted);
+  box-shadow: none;
+}
+
+.tx-bottom .btn { margin-inline-start: auto; }
+
+@media (max-width: 640px) {
+  .tx-summary { flex-wrap: wrap; }
+  .tx-summary-item { min-width: 30%; }
+}

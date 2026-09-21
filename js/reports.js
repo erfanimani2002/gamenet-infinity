@@ -628,6 +628,17 @@ const Reports = (function () {
     await loadMonthlyReport();
   }
 
+  // Icon + accent per transaction source, and Persian labels for the raw
+  // payType values stored on each record — used only to render the list,
+  // never persisted.
+  const TX_META = {
+    session: { icon: "🎮", cls: "tx-session" },
+    order: { icon: "☕", cls: "tx-order" },
+    blockPayment: { icon: "💳", cls: "tx-block" },
+    overnight: { icon: "🌙", cls: "tx-overnight" },
+  };
+  const PAY_TYPE_LABEL = { cash: "نقدی", card: "کارت", wallet: "کیف پول", debt: "بدهی", split: "ترکیبی" };
+
   async function showFullTransactions() {
     let range = Utils.getReportRange();
     let sessions = await DB.getAll("sessions");
@@ -661,9 +672,93 @@ const Reports = (function () {
 
     all.sort((a, b) => new Date(b.time) - new Date(a.time));
 
-    App.openModal(`<h2>لیست تراکنش‌ها</h2><div style="max-height:400px;overflow-y:auto;">
-      ${all.map((t) => `<div class="list-row"><span class="row-label">${t.type}</span><span class="row-value">${t.device} | ${t.ids}</span><span class="row-value amount">${Utils.formatCurrency(t.amount)}</span><span class="text-muted text-sm">${t.payType} | ${Jalali.formatDateTime(t.time)}</span>${t.txType === "overnight" ? `<span class="text-muted text-sm">غیرقابل‌ویرایش</span>` : `<button class="btn btn-sm btn-outline" onclick="Reports.editTransaction('${t.txType}', ${parseInt(t.txId) || 0})">ویرایش</button>`}</div>`).join("")}
-    </div><div class="modal-actions"><button class="btn btn-outline" onclick="App.closeModalForce()">بستن</button></div>`);
+    let totalIn = all.reduce((sum, t) => sum + (t.amount > 0 ? t.amount : 0), 0);
+    let totalOut = all.reduce((sum, t) => sum + (t.amount < 0 ? -t.amount : 0), 0);
+
+    let filterChips = [
+      { key: "all", label: "همه" },
+      { key: "session", label: "جلسات" },
+      { key: "order", label: "کافی‌شاپ" },
+      { key: "blockPayment", label: "تسویه بلوک" },
+      { key: "overnight", label: "رزرو شب" },
+    ].map((f) => `<button class="tx-chip${f.key === "all" ? " active" : ""}" data-tx-filter="${f.key}" onclick="Reports.filterTransactionRows(this)">${f.label}</button>`).join("");
+
+    let rowsHtml = "";
+    let lastDateKey = null;
+    if (all.length === 0) {
+      rowsHtml = `<div class="empty-state"><div class="empty-icon">🧾</div>تراکنشی در این بازه ثبت نشده</div>`;
+    } else {
+      all.forEach((t) => {
+        let dateKey = Jalali.formatDate(t.time);
+        if (dateKey !== lastDateKey) {
+          rowsHtml += `<div class="tx-date-heading">${dateKey}</div>`;
+          lastDateKey = dateKey;
+        }
+        let meta = TX_META[t.txType] || { icon: "🧾", cls: "" };
+        let amountCls = t.amount < 0 ? "negative" : "positive";
+        let amountSign = t.amount < 0 ? "" : "+";
+        let payLabel = PAY_TYPE_LABEL[t.payType] || t.payType || "-";
+        let actionHtml = t.txType === "overnight"
+          ? `<span class="text-muted text-sm">غیرقابل‌ویرایش</span>`
+          : `<button class="btn btn-sm btn-outline" onclick="Reports.editTransaction('${t.txType}', ${parseInt(t.txId) || 0})">ویرایش</button>`;
+        rowsHtml += `
+          <div class="tx-card" data-tx-type="${t.txType}">
+            <div class="tx-icon ${meta.cls}">${meta.icon}</div>
+            <div class="tx-main">
+              <div class="tx-top">
+                <span class="tx-title">${t.type}</span>
+                <span class="amount ${amountCls}">${amountSign}${Utils.formatCurrency(t.amount)}</span>
+              </div>
+              <div class="tx-sub">
+                <span>${t.device !== "-" ? t.device + " | " : ""}${t.ids}</span>
+              </div>
+              <div class="tx-bottom">
+                <span class="status-badge tx-pay-badge">${payLabel}</span>
+                <span class="text-muted text-sm">${Jalali.timeString ? Jalali.timeString(new Date(t.time)) : ""}</span>
+                ${actionHtml}
+              </div>
+            </div>
+          </div>`;
+      });
+    }
+
+    App.openModal(`
+      <h2>لیست تراکنش‌ها</h2>
+      <div class="tx-summary">
+        <div class="tx-summary-item"><span class="text-muted text-sm">دریافتی</span><span class="amount positive">${Utils.formatCurrency(totalIn)}</span></div>
+        <div class="tx-summary-item"><span class="text-muted text-sm">پرداختی/استرداد</span><span class="amount negative">${Utils.formatCurrency(totalOut)}</span></div>
+        <div class="tx-summary-item"><span class="text-muted text-sm">تعداد</span><span class="amount">${all.length}</span></div>
+      </div>
+      <div class="tx-filters">${filterChips}</div>
+      <div class="tx-list">${rowsHtml}</div>
+      <div class="modal-actions"><button class="btn btn-outline" onclick="App.closeModalForce()">بستن</button></div>
+    `, "modal-wide");
+  }
+
+  // Client-side filter for the transaction list modal: toggles which
+  // .tx-card rows (and their date headings) are visible, without re-querying
+  // the DB. Date headings are re-evaluated per filter so a day with no
+  // matching rows doesn't leave a dangling heading.
+  function filterTransactionRows(chipEl) {
+    let filter = chipEl.getAttribute("data-tx-filter");
+    let list = chipEl.closest(".modal").querySelector(".tx-list");
+    if (!list) return;
+    chipEl.parentElement.querySelectorAll(".tx-chip").forEach((c) => c.classList.remove("active"));
+    chipEl.classList.add("active");
+
+    let node = list.firstElementChild;
+    let pendingHeading = null;
+    while (node) {
+      if (node.classList.contains("tx-date-heading")) {
+        pendingHeading = node;
+        node.style.display = "none";
+      } else if (node.classList.contains("tx-card")) {
+        let show = filter === "all" || node.getAttribute("data-tx-type") === filter;
+        node.style.display = show ? "" : "none";
+        if (show && pendingHeading) { pendingHeading.style.display = ""; pendingHeading = null; }
+      }
+      node = node.nextElementSibling;
+    }
   }
 
   // A payment is "split" (wallet+debt) either because its stored payType says
@@ -1465,5 +1560,5 @@ const Reports = (function () {
     App.toast("اکسل دانلود شد");
   }
 
-  return { renderDaily, renderInstant, renderMonthly, loadMonthlyReport, showFullTransactions, exportDailyExcel, exportMonthlyExcel, showDayRecon, previewDayRecon, saveDayRecon, editTransaction, saveEditTransaction, deleteTransaction, reversePayment, calculateDailyTotals, freezeBusinessDay, autoClosePastDays };
+  return { renderDaily, renderInstant, renderMonthly, loadMonthlyReport, showFullTransactions, filterTransactionRows, exportDailyExcel, exportMonthlyExcel, showDayRecon, previewDayRecon, saveDayRecon, editTransaction, saveEditTransaction, deleteTransaction, reversePayment, calculateDailyTotals, freezeBusinessDay, autoClosePastDays };
 })();
