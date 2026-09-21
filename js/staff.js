@@ -1,6 +1,6 @@
 const Staff = (function () {
   async function render(el) {
-    let staffList = await DB.getAll("staff");
+    let staffList = (await DB.getAll("staff")).filter((s) => !s.deleted);
 
     let html = `
       <div class="card">
@@ -21,6 +21,7 @@ const Staff = (function () {
               }
             </span>
             <button class="btn btn-sm btn-outline" onclick="Staff.showStaffDetail(${s.id})">جزئیات</button>
+            <button class="btn btn-sm btn-danger" onclick="Staff.deleteStaff(${s.id})">حذف</button>
           </div>
         `).join("")}
       </div>
@@ -353,13 +354,38 @@ const Staff = (function () {
     return true;
   }
 
+  // "Deletes" a staff member without losing their history: shifts and
+  // consumption records live inside the staff record itself, so an actual
+  // DB.remove would wipe that history too. Instead this marks the record
+  // inactive — it disappears from the staff list and from places that pick
+  // a staff member going forward, but stays in the database, so past
+  // shifts, consumption, and any reports referencing them are unaffected.
+  async function deleteStaff(staffId) {
+    let staff = await DB.get("staff", staffId);
+    if (!staff) { App.toast("پرسنل یافت نشد"); return; }
+
+    let activeShift = (staff.shifts || []).find((s) => !s.end);
+    if (activeShift) {
+      App.toast("این پرسنل شیفت باز دارد — ابتدا شیفت را پایان دهید");
+      return;
+    }
+
+    if (!confirm("آیا از حذف پرسنل «" + staff.name + "» مطمئن هستید؟ (سوابق کاری او حفظ می‌شود)")) return;
+    staff.deleted = true;
+    staff.deletedAt = new Date().toISOString();
+    await DB.put("staff", staff);
+    await DB.logActivity("حذف پرسنل", staff.name);
+    App.toast("پرسنل حذف شد");
+    refresh();
+  }
+
   function refresh() { let el = document.getElementById("tab-staff"); if (el && el.classList.contains("active")) render(el); }
 
   return {
     render, showAddStaff, saveStaff, startShift, endShift, showStaffDetail, showActivityTab, showStatsTab, addConsumption,
     updateConsumptionQty, removeConsumption,
     startShiftAndRefreshTab, endShiftAndRefreshTab, addConsumptionAndRefreshTab,
-    confirmEndShiftPin, updateStaffPin,
+    confirmEndShiftPin, updateStaffPin, deleteStaff,
     refresh,
   };
 })();

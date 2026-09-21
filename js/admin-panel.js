@@ -150,7 +150,7 @@ const AdminPanel = (function () {
 
   async function renderStaffPins(el) {
     if (!el) return;
-    let staffList = await DB.getAll("staff");
+    let staffList = (await DB.getAll("staff")).filter((s) => !s.deleted);
     el.innerHTML = staffList.length === 0 ? '<div class="empty-state">هنوز پرسنلی ثبت نشده</div>' : staffList.map((s) => `
       <div class="list-row">
         <span class="row-value" style="font-weight:500">${Utils.escapeHtml(s.name)}</span>

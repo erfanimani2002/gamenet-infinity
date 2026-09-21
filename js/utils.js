@@ -253,7 +253,7 @@ const Utils = (function () {
 
   async function getSettlerOptions() {
     let users = await DB.getAll("users");
-    let staff = await DB.getAll("staff");
+    let staff = (await DB.getAll("staff")).filter((s) => !s.deleted);
     let options = [];
     users.forEach((u) => options.push({ value: "user_" + u.id, label: u.name + " (مدیریت)" }));
     staff.forEach((s) => options.push({ value: "staff_" + s.id, label: s.name + " (پرسنل)" }));
