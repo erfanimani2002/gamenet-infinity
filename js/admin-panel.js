@@ -133,6 +133,7 @@ const AdminPanel = (function () {
               <span class="row-value">${Utils.escapeHtml(u.username)}</span>
               <span class="row-value">${{ manager: 'مدیر', admin: 'ادمین' }[u.role] || u.role}</span>
               <span class="row-value">${Utils.escapeHtml(u.name)}</span>
+              <button class="btn btn-sm btn-danger" onclick="AdminPanel.deleteUser(${u.id})">حذف</button>
             </div>
           `).join("")}
           <button class="btn btn-sm btn-outline mt-2" onclick="AdminPanel.addUser()">+ کاربر جدید</button>
@@ -288,6 +289,36 @@ const AdminPanel = (function () {
     await DB.logActivity("افزودن کاربر", username + " (" + (role === 'manager' ? 'مدیر' : 'ادمین') + ")");
     App.closeModalForce();
     App.toast("کاربر ذخیره شد");
+    refresh();
+  }
+
+  // Deletes a system (login) user. Guarded against two ways this could lock
+  // everyone out: deleting your own currently-logged-in account, and deleting
+  // the last remaining manager account (managers are the only role with full
+  // access — see Auth.canAccess — so the system needs at least one).
+  async function deleteUser(id) {
+    let users = await DB.getAll("users");
+    let user = users.find((u) => u.id === id);
+    if (!user) { App.toast("کاربر یافت نشد"); return; }
+
+    let session = Auth.getSession();
+    if (session && session.id === id) {
+      App.toast("نمی‌توانید حساب کاربری خودتان را که با آن وارد شده‌اید حذف کنید");
+      return;
+    }
+
+    if (user.role === "manager") {
+      let remainingManagers = users.filter((u) => u.role === "manager" && u.id !== id);
+      if (remainingManagers.length === 0) {
+        App.toast("حذف آخرین حساب مدیر ممکن نیست — حداقل یک مدیر باید باقی بماند");
+        return;
+      }
+    }
+
+    if (!confirm("آیا از حذف کاربر «" + user.username + "» مطمئن هستید؟")) return;
+    await DB.remove("users", id);
+    await DB.logActivity("حذف کاربر", user.username + " (" + (user.role === 'manager' ? 'مدیر' : 'ادمین') + ")");
+    App.toast("کاربر حذف شد");
     refresh();
   }
 

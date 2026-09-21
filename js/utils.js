@@ -309,34 +309,62 @@ const Utils = (function () {
   }
 
   // Renders a payer picker that lists ALL customers (not just those already
-  // attached to the session/order being settled), with a search input to
-  // filter by ID — following the same search-then-pick pattern used elsewhere
-  // (e.g. Consoles.filterCustomers) but built on a plain <select> so existing
-  // `document.getElementById(selectId).value` reads keep working unchanged.
-  // `defaultId` (usually the session's first customer) is preselected for
-  // convenience but any customer can still be chosen.
+  // attached to the session/order being settled), with a search-then-pick
+  // list — the same proven pattern used elsewhere (e.g. Consoles.filterCustomers,
+  // Tournaments.filterAddParticipantList: a text input filters visible
+  // `.list-row` elements via `row.style.display`). An earlier version of this
+  // picker used a plain <select> with hidden <option>s instead; that doesn't
+  // reliably work, because a closed <select> keeps showing whatever option was
+  // last selected regardless of which options are hidden, so typing in the
+  // search box produces no visible change until the dropdown is manually
+  // opened — it looks broken. The picked customer's id is kept in a hidden
+  // input with id `selectId` so existing `document.getElementById(selectId).value`
+  // reads keep working unchanged. `defaultId` (usually the session's first
+  // customer) is preselected for convenience but any customer can still be
+  // picked, by id or by name.
   function renderPayerSelect(customers, defaultId, selectId) {
     let selected = defaultId != null && customers.some((c) => c.id === defaultId)
       ? defaultId
       : (customers[0] && customers[0].id);
-    let options = customers.map((c) => {
+    let selectedCustomer = customers.find((c) => c.id === selected);
+    let rows = customers.map((c) => {
       let idLabel = String(c.displayId || c.id);
       let fullName = ((c.firstName || "") + " " + (c.lastName || "")).trim();
       let label = fullName ? fullName + " (#" + idLabel + ")" : "#" + idLabel;
-      return `<option value="${c.id}" ${c.id === selected ? 'selected' : ''} data-search="${Utils.escapeHtml(idLabel)}">${Utils.escapeHtml(label)}</option>`;
+      let searchLabel = (idLabel + " " + fullName).toLowerCase();
+      return `<div class="list-row customer-pick${c.id === selected ? ' active' : ''}" data-id="${c.id}" data-search="${Utils.escapeHtml(searchLabel)}" onclick="Utils.pickPayer('${selectId}', ${c.id})"><span class="row-label">${Utils.escapeHtml(label)}</span></div>`;
     }).join("");
     return `
-      <input type="text" placeholder="جستجوی شناسه..." style="width:100%;margin-bottom:4px;padding:6px 8px;border:1px solid var(--border);border-radius:var(--radius-sm);font-size:12px;box-sizing:border-box;" oninput="Utils.filterPayerSelect(this)">
-      <select id="${selectId}">${options}</select>
+      <input type="hidden" id="${selectId}" value="${selected != null ? selected : ''}">
+      <input type="text" placeholder="جستجوی شناسه یا نام..." value="${selectedCustomer ? Utils.escapeHtml(selectedCustomer.displayId || selectedCustomer.id) : ''}" style="width:100%;margin-bottom:4px;padding:6px 8px;border:1px solid var(--border);border-radius:var(--radius-sm);font-size:12px;box-sizing:border-box;" oninput="Utils.filterPayerSelect(this)">
+      <div class="customer-pick-list">${rows}</div>
     `;
+  }
+
+  // Picks a customer for a payer picker rendered by renderPayerSelect: stores
+  // the id on the hidden input, highlights the chosen row, and reflects the
+  // choice back into the search box so it's clear what's currently selected.
+  function pickPayer(selectId, customerId) {
+    let hiddenInput = document.getElementById(selectId);
+    if (!hiddenInput || !hiddenInput.parentElement) return;
+    hiddenInput.value = customerId;
+    let list = hiddenInput.parentElement.querySelector(".customer-pick-list");
+    let searchInput = hiddenInput.nextElementSibling;
+    if (list) {
+      list.querySelectorAll(".customer-pick").forEach((row) => {
+        row.classList.toggle("active", Number(row.dataset.id) === Number(customerId));
+      });
+      let pickedRow = list.querySelector(`.customer-pick[data-id="${customerId}"]`);
+      if (searchInput && pickedRow) searchInput.value = pickedRow.querySelector(".row-label").textContent;
+    }
   }
 
   function filterPayerSelect(input) {
     let q = input.value.toLowerCase();
-    let select = input.nextElementSibling;
-    if (!select) return;
-    Array.from(select.options).forEach((opt) => {
-      opt.hidden = !(opt.dataset.search || "").toLowerCase().includes(q);
+    let list = input.nextElementSibling;
+    if (!list) return;
+    list.querySelectorAll(".customer-pick").forEach((row) => {
+      row.style.display = row.dataset.search.includes(q) ? "flex" : "none";
     });
   }
 
@@ -613,7 +641,7 @@ const Utils = (function () {
     calculateSessionDuration, formatDuration, formatTimerDisplay,
     isInRange, escapeHtml, renderSelectLabel,
     applyPayment, computePaymentUpdate, guardDoubleClick, withLock, getSettlerOptions, renderSettlerSelect, getSettlerName, getCustomerDisplayId, renderCustomerId,
-    getJalaliWeekday, resolveTransferRate, renderPayerSelect, filterPayerSelect,
+    getJalaliWeekday, resolveTransferRate, renderPayerSelect, pickPayer, filterPayerSelect,
     getEffectiveDiscount,
     skeletonDeviceList, skeletonCard, debounce,
     renderStartTimePicker, initTimePicker, getSelectedStartTime,
