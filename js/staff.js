@@ -32,6 +32,7 @@ const Staff = (function () {
     App.openModal(`
       <h2>افزودن پرسنل</h2>
       <div class="form-group"><label>نام</label><input type="text" id="staffName" placeholder="نام پرسنل"></div>
+      <div class="form-group"><label>رمز بستن تایم (۴ رقم)</label><input type="text" id="staffPin" placeholder="مثلاً ۱۲۳۴" maxlength="4" inputmode="numeric" pattern="[0-9]*"></div>
       <div class="modal-actions">
         <button class="btn btn-primary" onclick="Staff.saveStaff()">ذخیره</button>
         <button class="btn btn-outline" onclick="App.closeModalForce()">انصراف</button>
@@ -41,8 +42,10 @@ const Staff = (function () {
 
   async function saveStaff() {
     let name = document.getElementById("staffName").value.trim();
+    let pin = document.getElementById("staffPin").value.trim();
     if (!name) { App.toast("نام الزامی است"); return; }
-    await DB.add("staff", { name, shifts: [], consumption: [] });
+    if (!/^\d{4}$/.test(pin)) { App.toast("رمز باید ۴ رقم باشد"); return; }
+    await DB.add("staff", { name, pin, shifts: [], consumption: [] });
     await DB.logActivity("افزودن پرسنل", name);
     App.closeModalForce(); App.toast("ذخیره شد"); refresh();
   }
@@ -59,10 +62,37 @@ const Staff = (function () {
     App.toast("شیفت شروع شد"); refresh();
   }
 
-  async function endShift(staffId) {
+  // Ending a shift requires a PIN: either the staff member's own 4-digit PIN
+  // (set when they were added, editable in the management panel) or any
+  // manager account's login password, which always works as an override.
+  function endShift(staffId) { openEndShiftPinModal(staffId, false); }
+
+  function openEndShiftPinModal(staffId, isTabContext) {
+    App.openModal(`
+      <h2>پایان کار</h2>
+      <div class="form-group"><label>رمز پرسنل (یا رمز مدیر)</label><input type="password" id="endShiftPin" placeholder="رمز" inputmode="numeric"></div>
+      <div class="modal-actions">
+        <button class="btn btn-primary" onclick="Staff.confirmEndShiftPin(${staffId}, ${isTabContext})">تایید</button>
+        <button class="btn btn-outline" onclick="App.closeModalForce()">انصراف</button>
+      </div>
+    `);
+  }
+
+  async function confirmEndShiftPin(staffId, isTabContext) {
+    let input = document.getElementById("endShiftPin");
+    let entered = input ? input.value.trim() : "";
     let staff = await DB.get("staff", staffId);
     if (!staff) { App.toast("پرسنل یافت نشد"); return; }
-    let active = staff.shifts.find((s) => !s.end);
+    let ok = !!entered && (entered === staff.pin || await Auth.verifyManagerPassword(entered));
+    if (!ok) { App.toast("رمز اشتباه است"); return; }
+    App.closeModalForce();
+    await doEndShift(staff);
+    if (isTabContext) { await showActivityTab(staffId); }
+    else { refresh(); }
+  }
+
+  async function doEndShift(staff) {
+    let active = (staff.shifts || []).find((s) => !s.end);
     if (active) {
       active.end = new Date().toISOString();
       await DB.put("staff", staff);
@@ -72,7 +102,6 @@ const Staff = (function () {
     } else {
       App.toast("شیفت فعالی وجود ندارد");
     }
-    refresh();
   }
 
   async function showStaffDetail(staffId) {
@@ -308,8 +337,21 @@ const Staff = (function () {
   // Wrappers that await the underlying action before re-rendering the activity
   // tab, so a rapid re-render can't race ahead of the DB write it depends on.
   async function startShiftAndRefreshTab(staffId) { await startShift(staffId); await showActivityTab(staffId); }
-  async function endShiftAndRefreshTab(staffId) { await endShift(staffId); await showActivityTab(staffId); }
+  function endShiftAndRefreshTab(staffId) { openEndShiftPinModal(staffId, true); }
   async function addConsumptionAndRefreshTab(staffId, itemId) { await addConsumption(staffId, itemId); await showActivityTab(staffId); }
+
+  // Viewed/edited from the management panel (manager-only): sets or changes
+  // a staff member's 4-digit clock-out PIN.
+  async function updateStaffPin(staffId, newPin) {
+    let staff = await DB.get("staff", staffId);
+    if (!staff) { App.toast("پرسنل یافت نشد"); return false; }
+    if (!/^\d{4}$/.test(newPin)) { App.toast("رمز باید ۴ رقم باشد"); return false; }
+    staff.pin = newPin;
+    await DB.put("staff", staff);
+    await DB.logActivity("تغییر رمز پرسنل", staff.name);
+    App.toast("رمز ذخیره شد");
+    return true;
+  }
 
   function refresh() { let el = document.getElementById("tab-staff"); if (el && el.classList.contains("active")) render(el); }
 
@@ -317,6 +359,7 @@ const Staff = (function () {
     render, showAddStaff, saveStaff, startShift, endShift, showStaffDetail, showActivityTab, showStatsTab, addConsumption,
     updateConsumptionQty, removeConsumption,
     startShiftAndRefreshTab, endShiftAndRefreshTab, addConsumptionAndRefreshTab,
+    confirmEndShiftPin, updateStaffPin,
     refresh,
   };
 })();

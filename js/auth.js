@@ -86,5 +86,16 @@ const Auth = (function () {
     sessionStorage.setItem("gnet_user", JSON.stringify(currentUser));
   }
 
-  return { login, logout, getSession, isAdmin, isManager, canAccess, hashPassword, mustChangePassword, changeMyPassword };
+  // Used for staff clock-out PIN checks: the manager's own account password
+  // is always accepted as a valid clock-out credential for any staff member.
+  async function verifyManagerPassword(password) {
+    if (!password) return false;
+    var users = await DB.getAll("users");
+    var managers = users.filter(function (u) { return u.role === "manager"; });
+    if (managers.length === 0) return false;
+    var hashedInput = await hashPassword(password);
+    return managers.some(function (u) { return u.password === hashedInput || u.password === password; });
+  }
+
+  return { login, logout, getSession, isAdmin, isManager, canAccess, hashPassword, mustChangePassword, changeMyPassword, verifyManagerPassword };
 })();

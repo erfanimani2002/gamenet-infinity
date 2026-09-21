@@ -70,24 +70,53 @@ const Purchases = (function () {
     refresh();
   }
 
-  function showAddPurchase() {
+  // Holds captured purchase-form field values while the "+ آیتم جدید" mini
+  // form is on screen, so we can rebuild the purchase modal with everything
+  // the user had already typed once they're done (or cancel).
+  let pendingPurchaseFormValues = null;
+
+  async function showAddPurchase() {
+    let cafeItems = await DB.getAll("cafeItems");
+    renderAddPurchaseModal(cafeItems, {});
+  }
+
+  function renderAddPurchaseModal(cafeItems, preset) {
+    let qtys = preset.qtys || {};
     App.openModal(`
       <h2>ثبت خرید جدید</h2>
       <div class="form-group"><label>دسته‌بندی</label>
-        <select id="purCategory"><option value="items">موارد</option><option value="fridge">یخچال</option></select>
-      </div>
-      <div class="form-group"><label>توضیحات</label><input type="text" id="purDesc" placeholder="توضیحات"></div>
-      <div class="form-group"><label>مبلغ (تومان)</label><input type="number" id="purAmount" placeholder="مبلغ" min="0"></div>
-      <div class="form-group"><label>روش پرداخت</label>
-        <select id="purPayType" onchange="Purchases.toggleThirdParty()">
-          <option value="cash">نقدی</option>
-          <option value="pasargad">پاسارگاد</option>
-          <option value="other">سایر</option>
+        <select id="purCategory">
+          <option value="items" ${preset.category !== 'fridge' ? 'selected' : ''}>موارد</option>
+          <option value="fridge" ${preset.category === 'fridge' ? 'selected' : ''}>یخچال</option>
         </select>
       </div>
-      <div class="form-group" id="purThirdPartyGroup" style="display:none">
+      <div class="form-group"><label>توضیحات</label><input type="text" id="purDesc" placeholder="توضیحات" value="${Utils.escapeHtml(preset.description || '')}"></div>
+      <div class="form-group"><label>مبلغ (تومان)</label><input type="number" id="purAmount" placeholder="مبلغ" min="0" value="${preset.amount || ''}"></div>
+      <div class="form-group"><label>روش پرداخت</label>
+        <select id="purPayType" onchange="Purchases.toggleThirdParty()">
+          <option value="cash" ${!preset.paymentType || preset.paymentType === 'cash' ? 'selected' : ''}>نقدی</option>
+          <option value="pasargad" ${preset.paymentType === 'pasargad' ? 'selected' : ''}>پاسارگاد</option>
+          <option value="other" ${preset.paymentType === 'other' ? 'selected' : ''}>سایر</option>
+        </select>
+      </div>
+      <div class="form-group" id="purThirdPartyGroup" style="display:${preset.paymentType === 'other' ? 'block' : 'none'}">
         <label>نام پرداخت‌کننده (شخص ثالث)</label>
-        <input type="text" id="purThirdParty" placeholder="نام شخص">
+        <input type="text" id="purThirdParty" placeholder="نام شخص" value="${Utils.escapeHtml(preset.thirdParty || '')}">
+      </div>
+      <div class="form-group">
+        <label><input type="checkbox" id="purUpdateInventory" ${preset.updateInventory ? 'checked' : ''} onchange="Purchases.toggleInventorySection()"> به‌روزرسانی موجودی کافی‌شاپ</label>
+      </div>
+      <div id="purInventorySection" style="display:${preset.updateInventory ? 'block' : 'none'}">
+        <div class="pick-list">
+          ${cafeItems.length === 0 ? '<div class="text-muted text-sm">آیتمی تعریف نشده</div>' : cafeItems.map((item) => `
+            <div class="list-row">
+              <span class="row-value">${Utils.escapeHtml(item.name)}</span>
+              <span class="text-muted text-sm">${item.unlimited ? 'نامحدود' : 'موجودی فعلی: ' + item.stock}</span>
+              <input type="number" class="pur-item-qty" data-item-id="${item.id}" min="0" placeholder="تعداد افزایش" value="${qtys[item.id] || ''}" style="width:90px">
+            </div>
+          `).join("")}
+        </div>
+        <button type="button" class="btn btn-sm btn-outline mt-2" onclick="Purchases.showQuickAddItem()">+ آیتم جدید</button>
       </div>
       <div class="modal-actions">
         <button class="btn btn-primary" onclick="Purchases.savePurchase()">ذخیره</button>
@@ -100,6 +129,72 @@ const Purchases = (function () {
     document.getElementById("purThirdPartyGroup").style.display = document.getElementById("purPayType").value === "other" ? "block" : "none";
   }
 
+  function toggleInventorySection() {
+    let checked = document.getElementById("purUpdateInventory").checked;
+    document.getElementById("purInventorySection").style.display = checked ? "block" : "none";
+  }
+
+  function captureFormState() {
+    let qtys = {};
+    document.querySelectorAll(".pur-item-qty").forEach((el) => {
+      if (el.value) qtys[el.dataset.itemId] = el.value;
+    });
+    return {
+      category: document.getElementById("purCategory")?.value,
+      description: document.getElementById("purDesc")?.value,
+      amount: document.getElementById("purAmount")?.value,
+      paymentType: document.getElementById("purPayType")?.value,
+      thirdParty: document.getElementById("purThirdParty")?.value,
+      updateInventory: document.getElementById("purUpdateInventory")?.checked,
+      qtys,
+    };
+  }
+
+  // Opens a small "new cafe item" form on top of the purchase form, without
+  // losing whatever the user had already filled in — the purchase modal is
+  // rebuilt with those values (plus the new item, pre-filled with the
+  // restock quantity entered here) once this mini-form is done or cancelled.
+  function showQuickAddItem() {
+    pendingPurchaseFormValues = captureFormState();
+    App.openModal(`
+      <h2>آیتم جدید کافی‌شاپ</h2>
+      <div class="form-group"><label>نام آیتم</label><input type="text" id="quickItemName" placeholder="نام"></div>
+      <div class="form-group"><label>قیمت (تومان)</label><input type="number" id="quickItemPrice" placeholder="قیمت" min="0"></div>
+      <div class="form-group"><label>تعداد برای شارژ</label><input type="number" id="quickItemQty" placeholder="تعداد" min="0" value="0"></div>
+      <div class="modal-actions">
+        <button class="btn btn-primary" onclick="Purchases.saveQuickAddItem()">ذخیره و بازگشت</button>
+        <button class="btn btn-outline" onclick="Purchases.cancelQuickAddItem()">انصراف</button>
+      </div>
+    `);
+  }
+
+  async function saveQuickAddItem() {
+    let name = document.getElementById("quickItemName").value.trim();
+    let price = Math.round(parseFloat(document.getElementById("quickItemPrice").value) || 0);
+    let qty = parseInt(document.getElementById("quickItemQty").value) || 0;
+    if (!name) { App.toast("نام آیتم الزامی است"); return; }
+    if (!Number.isFinite(price) || price < 0) { App.toast("قیمت نامعتبر"); return; }
+    let newItemId = await DB.add("cafeItems", { name, price, stock: 0, unlimited: false, image: null });
+    await DB.logActivity("افزودن آیتم", name);
+
+    let preset = pendingPurchaseFormValues || {};
+    preset.updateInventory = true;
+    preset.qtys = preset.qtys || {};
+    if (qty > 0) preset.qtys[newItemId] = qty;
+    pendingPurchaseFormValues = null;
+
+    let cafeItems = await DB.getAll("cafeItems");
+    renderAddPurchaseModal(cafeItems, preset);
+    App.toast("آیتم اضافه شد");
+  }
+
+  async function cancelQuickAddItem() {
+    let preset = pendingPurchaseFormValues || {};
+    pendingPurchaseFormValues = null;
+    let cafeItems = await DB.getAll("cafeItems");
+    renderAddPurchaseModal(cafeItems, preset);
+  }
+
   async function savePurchase() {
     let category = document.getElementById("purCategory").value;
     let description = document.getElementById("purDesc").value.trim();
@@ -108,11 +203,35 @@ const Purchases = (function () {
     if (!Number.isFinite(amount) || amount <= 0) { App.toast("مبلغ نامعتبر"); return; }
     let payType = document.getElementById("purPayType").value;
     let thirdParty = document.getElementById("purThirdParty")?.value.trim() || "";
-    // TODO(fridge stock): a "fridge" purchase currently just records the expense.
-    // It should optionally let the user pick a cafe item to increment inventory,
-    // but that UI is deferred — we deliberately do NOT fake/auto-increment stock.
+    let updateInventory = document.getElementById("purUpdateInventory")?.checked || false;
+
+    // Collect the requested restock quantities before writing anything, so a
+    // bad amount/qty doesn't leave a purchase saved with a half-applied
+    // inventory update.
+    let restocks = [];
+    if (updateInventory) {
+      let qtyEls = document.querySelectorAll(".pur-item-qty");
+      for (let el of qtyEls) {
+        let qty = parseInt(el.value);
+        if (Number.isFinite(qty) && qty > 0) {
+          restocks.push({ itemId: parseInt(el.dataset.itemId), qty });
+        }
+      }
+    }
+
     await DB.add("purchases", { category, description, amount, paymentType: payType, thirdParty, date: new Date().toISOString(), settled: false });
     await DB.logActivity("ثبت خرید", description + " - " + Utils.formatCurrency(amount));
+
+    for (let r of restocks) {
+      let item = await DB.get("cafeItems", r.itemId);
+      if (!item) continue;
+      if (!item.unlimited) {
+        item.stock = (item.stock || 0) + r.qty;
+        await DB.put("cafeItems", item);
+      }
+      await DB.logActivity("شارژ موجودی از خرید", item.name + " + " + r.qty);
+    }
+
     App.closeModalForce(); App.toast("خرید ثبت شد"); refresh();
   }
 
@@ -171,5 +290,9 @@ const Purchases = (function () {
 
   function refresh() { let el = document.getElementById("tab-purchases"); if (el && el.classList.contains("active")) render(el); }
 
-  return { render, setFilter, showAddPurchase, toggleThirdParty, savePurchase, showSettlePurchase, confirmSettlePurchase, showPurchaseDetails, refresh };
+  return {
+    render, setFilter, showAddPurchase, toggleThirdParty, toggleInventorySection,
+    showQuickAddItem, saveQuickAddItem, cancelQuickAddItem, savePurchase,
+    showSettlePurchase, confirmSettlePurchase, showPurchaseDetails, refresh,
+  };
 })();

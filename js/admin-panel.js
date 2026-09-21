@@ -120,6 +120,13 @@ const AdminPanel = (function () {
         <hr class="section-divider">
 
         <div class="report-section">
+          <h3>رمز بستن تایم پرسنل</h3>
+          <div id="staffPinSection"></div>
+        </div>
+
+        <hr class="section-divider">
+
+        <div class="report-section">
           <h3>مدیریت کاربران سیستم</h3>
           ${users.map((u) => `
             <div class="list-row">
@@ -137,6 +144,25 @@ const AdminPanel = (function () {
     await Inventory.render(document.getElementById("inventorySection"));
     await Penalties.render(document.getElementById("penaltySection"));
     renderClubConfig(document.getElementById("clubRankConfig"));
+    await renderStaffPins(document.getElementById("staffPinSection"));
+  }
+
+  async function renderStaffPins(el) {
+    if (!el) return;
+    let staffList = await DB.getAll("staff");
+    el.innerHTML = staffList.length === 0 ? '<div class="empty-state">هنوز پرسنلی ثبت نشده</div>' : staffList.map((s) => `
+      <div class="list-row">
+        <span class="row-value" style="font-weight:500">${Utils.escapeHtml(s.name)}</span>
+        <input type="text" class="staff-pin-input" data-staff-id="${s.id}" value="${Utils.escapeHtml(s.pin || '')}" maxlength="4" inputmode="numeric" pattern="[0-9]*" style="width:70px">
+        <button class="btn btn-sm btn-outline" onclick="AdminPanel.saveStaffPin(${s.id})">ذخیره</button>
+      </div>
+    `).join("");
+  }
+
+  async function saveStaffPin(staffId) {
+    let input = document.querySelector(`.staff-pin-input[data-staff-id="${staffId}"]`);
+    if (!input) return;
+    await Staff.updateStaffPin(staffId, input.value.trim());
   }
 
   async function savePricing() {
@@ -347,5 +373,5 @@ const AdminPanel = (function () {
     if (el && el.classList.contains("active")) render(el);
   }
 
-  return { render, savePricing, saveCustomerClub, addClubCategory, removeClubCategory, addDevice, editDevice, saveDevice, deleteDevice, addUser, saveUser, refresh };
+  return { render, savePricing, saveCustomerClub, addClubCategory, removeClubCategory, addDevice, editDevice, saveDevice, deleteDevice, addUser, saveUser, saveStaffPin, refresh };
 })();
